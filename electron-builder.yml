@@ -1,0 +1,51 @@
+appId: app.llm-cost-monitor
+productName: LLM Cost Monitor
+
+directories:
+  output: dist
+  buildResources: resources
+
+files:
+  - out/**/*
+  - resources/icons/**/*
+  - resources/pricing.json
+
+extraResources:
+  - from: resources/icons
+    to: icons
+  - from: resources/pricing.json
+    to: pricing.json
+
+mac:
+  target:
+    - target: dmg
+      arch:
+        - universal
+  icon: resources/icons/tray-Template.png
+  # Code signing and notarization configured in slice 15.
+  # identity: null
+  # notarize: false
+
+linux:
+  target:
+    - deb
+    - AppImage
+  icon: resources/icons/tray-Template.png
+  category: Utility
+
+deb:
+  depends:
+    - libgtk-3-0
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - libatspi2.0-0
+    - libuuid1
+
+# Auto-update channel (electron-updater, wired in slice 15).
+# publish:
+#   provider: github
+#   owner: <owner>
+#   repo: llm-cost-monitor
