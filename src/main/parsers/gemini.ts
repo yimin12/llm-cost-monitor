@@ -4,11 +4,13 @@ import { basename, join, relative } from 'node:path'
 
 import type { UsageEvent } from '@shared/usage-event'
 import type { PricingTable } from '../pricing/pricing-table'
+import type { FileCache } from '../storage/file-cache'
 import { buildEventId, readJsonlLines } from './jsonl'
 
 export interface GeminiParseOptions {
   geminiHome?: string
   pricing: PricingTable
+  fileCache?: FileCache
 }
 
 interface GeminiTokens {
@@ -72,7 +74,28 @@ export async function discoverGeminiJsonlFiles(geminiHome: string): Promise<stri
 export async function parseGeminiFile(
   path: string,
   pricing: PricingTable,
+  fileCache?: FileCache,
 ): Promise<UsageEvent[]> {
+  let resumeFromOffset = 0
+  let fileSize = 0
+  let fileMtime = 0
+  if (fileCache !== undefined) {
+    try {
+      const s = await stat(path)
+      fileSize = s.size
+      fileMtime = Math.floor(s.mtimeMs)
+      const cached = fileCache.get(path)
+      if (cached !== null && cached.mtime === fileMtime && cached.lastOffset === fileSize) {
+        return []
+      }
+      if (cached !== null && cached.lastOffset > 0 && cached.lastOffset <= fileSize) {
+        resumeFromOffset = cached.lastOffset
+      }
+    } catch {
+      /* fall through to full parse */
+    }
+  }
+
   // Project label = the directory name two levels above the file
   // (`<geminiHome>/tmp/<PROJECT>/chats/session-*.jsonl`).
   const parts = path.split('/')
@@ -81,7 +104,7 @@ export async function parseGeminiFile(
 
   const events: UsageEvent[] = []
 
-  for await (const line of readJsonlLines(path)) {
+  for await (const line of readJsonlLines(path, { startOffset: resumeFromOffset })) {
     const row = line.parsed as GeminiRow
     if (row.tokens === undefined) continue
 
@@ -135,6 +158,15 @@ export async function parseGeminiFile(
     events.push({ ...partial, computedCostMicroUsd: cost })
   }
 
+  if (fileCache !== undefined && fileSize > 0) {
+    fileCache.upsert({
+      path,
+      mtime: fileMtime,
+      lastParsedAt: Date.now(),
+      lastOffset: fileSize,
+    })
+  }
+
   return events
 }
 
@@ -144,7 +176,7 @@ export async function parseGemini(opts: GeminiParseOptions): Promise<UsageEvent[
   const all: UsageEvent[] = []
   for (const f of files) {
     try {
-      const events = await parseGeminiFile(f, opts.pricing)
+      const events = await parseGeminiFile(f, opts.pricing, opts.fileCache)
       all.push(...events)
     } catch (err) {
       console.warn(`gemini parser: skipped ${relative(geminiHome, f)}: ${(err as Error).message}`)

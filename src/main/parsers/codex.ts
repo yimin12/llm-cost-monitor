@@ -4,12 +4,14 @@ import { basename, join, relative } from 'node:path'
 
 import type { UsageEvent } from '@shared/usage-event'
 import type { PricingTable } from '../pricing/pricing-table'
+import type { FileCache } from '../storage/file-cache'
 import { buildEventId, readJsonlLines } from './jsonl'
 import { simplifyProjectName } from './project-name'
 
 export interface CodexParseOptions {
   codexHome?: string
   pricing: PricingTable
+  fileCache?: FileCache
 }
 
 interface CodexLine {
@@ -88,7 +90,30 @@ function deriveProject(cwd: string | undefined, fallbackPath: string): { project
 export async function parseCodexFile(
   path: string,
   pricing: PricingTable,
+  fileCache?: FileCache,
 ): Promise<UsageEvent[]> {
+  let resumeFromOffset = 0
+  let fileSize = 0
+  let fileMtime = 0
+  if (fileCache !== undefined) {
+    try {
+      const s = await stat(path)
+      fileSize = s.size
+      fileMtime = Math.floor(s.mtimeMs)
+      const cached = fileCache.get(path)
+      if (cached !== null && cached.mtime === fileMtime && cached.lastOffset === fileSize) {
+        return []
+      }
+      // For Codex we always reparse from byte 0: cumulative `last_token_usage`
+      // means partial reads can produce duplicates with an offset resume.
+      // Upsert dedup by id will collapse them, but reparsing from 0 keeps
+      // the dedup id math stable. The stat skip above still wins on
+      // unchanged files, which is the common case.
+    } catch {
+      /* fall through to full parse */
+    }
+  }
+
   let currentModel = 'unknown'
   let currentTurnId: string | null = null
   let sessionId: string | null = null
@@ -96,7 +121,7 @@ export async function parseCodexFile(
 
   const events: UsageEvent[] = []
 
-  for await (const line of readJsonlLines(path)) {
+  for await (const line of readJsonlLines(path, { startOffset: resumeFromOffset })) {
     const row = line.parsed as CodexLine
     if (row.type === 'session_meta') {
       sessionId = row.payload?.id ?? null
@@ -165,6 +190,15 @@ export async function parseCodexFile(
     events.push({ ...partial, computedCostMicroUsd: cost })
   }
 
+  if (fileCache !== undefined && fileSize > 0) {
+    fileCache.upsert({
+      path,
+      mtime: fileMtime,
+      lastParsedAt: Date.now(),
+      lastOffset: fileSize,
+    })
+  }
+
   return events
 }
 
@@ -174,7 +208,7 @@ export async function parseCodex(opts: CodexParseOptions): Promise<UsageEvent[]>
   const all: UsageEvent[] = []
   for (const f of files) {
     try {
-      const events = await parseCodexFile(f, opts.pricing)
+      const events = await parseCodexFile(f, opts.pricing, opts.fileCache)
       all.push(...events)
     } catch (err) {
       console.warn(`codex parser: skipped ${relative(codexHome, f)}: ${(err as Error).message}`)

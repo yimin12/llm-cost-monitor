@@ -161,3 +161,56 @@ body {
   color: rgba(245, 245, 247, 0.55);
   font-weight: 400;
 }
+
+.forecast {
+  background: rgba(48, 209, 88, 0.06);
+  border: 1px solid rgba(48, 209, 88, 0.18);
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.forecast-empty {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.08);
+  color: rgba(245, 245, 247, 0.45);
+  font-size: 11px;
+  font-style: italic;
+}
+.forecast-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  align-items: baseline;
+  font-variant-numeric: tabular-nums;
+}
+.forecast-label {
+  font-size: 11px;
+  color: rgba(245, 245, 247, 0.7);
+}
+.forecast-value {
+  font-size: 13px;
+  font-weight: 600;
+}
+.forecast-sub {
+  font-size: 10px;
+  color: rgba(245, 245, 247, 0.5);
+  min-width: 60px;
+  text-align: right;
+}
+
+.privacy {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 8px;
+  margin-top: 4px;
+}
+.privacy-line {
+  font-size: 10px;
+  color: rgba(245, 245, 247, 0.5);
+  line-height: 1.4;
+}
+.privacy-line strong {
+  color: rgba(245, 245, 247, 0.75);
+  font-weight: 600;
+}

@@ -2,6 +2,7 @@ import type { AIProvider } from '@shared/provider'
 
 import type { PricingTable } from '../pricing/pricing-table'
 import type { EventRepository } from '../storage/event-repository'
+import type { FileCache } from '../storage/file-cache'
 import { AnthropicProvider } from './anthropic/index'
 import { GoogleProvider } from './google/index'
 import { OpenAIProvider } from './openai/index'
@@ -9,6 +10,7 @@ import { OpenAIProvider } from './openai/index'
 export interface ProviderRegistryDeps {
   pricing: PricingTable
   events: EventRepository
+  fileCache: FileCache
 }
 
 export interface ProviderInfo {

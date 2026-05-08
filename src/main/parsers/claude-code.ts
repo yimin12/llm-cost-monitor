@@ -5,6 +5,7 @@ import { basename, join } from 'node:path'
 import { canonical, inferred } from '@shared/provider-identity'
 import type { UsageEvent } from '@shared/usage-event'
 import type { PricingTable } from '../pricing/pricing-table'
+import type { FileCache } from '../storage/file-cache'
 import { buildEventId, readJsonlLines } from './jsonl'
 import { simplifyProjectName } from './project-name'
 
@@ -13,6 +14,9 @@ export interface ClaudeCodeParseOptions {
   claudeHome?: string
   // Pricing table for cost computation.
   pricing: PricingTable
+  // Optional mtime+offset cache. When provided, unchanged files skip parse
+  // entirely, and grown files resume from the last byte offset.
+  fileCache?: FileCache
 }
 
 interface ClaudeUsage {
@@ -87,7 +91,32 @@ export async function discoverClaudeJsonlFiles(claudeHome: string): Promise<stri
 export async function parseClaudeFile(
   path: string,
   pricing: PricingTable,
+  fileCache?: FileCache,
 ): Promise<UsageEvent[]> {
+  // Fast path: consult mtime+offset cache. If unchanged size + mtime, skip.
+  let resumeFromOffset = 0
+  let fileSize = 0
+  let fileMtime = 0
+  if (fileCache !== undefined) {
+    try {
+      const s = await stat(path)
+      fileSize = s.size
+      fileMtime = Math.floor(s.mtimeMs)
+      const cached = fileCache.get(path)
+      if (cached !== null && cached.mtime === fileMtime && cached.lastOffset === fileSize) {
+        return []
+      }
+      // Resume from last offset only if nothing earlier in the file changed —
+      // mtime can only confirm the file didn't shrink. Conservative: if the
+      // recorded lastOffset is in range, resume there; otherwise reparse.
+      if (cached !== null && cached.lastOffset > 0 && cached.lastOffset <= fileSize) {
+        resumeFromOffset = cached.lastOffset
+      }
+    } catch {
+      // Stat failed — fall back to full parse.
+    }
+  }
+
   // Slug = parent directory name. Last path segment of file = sessionId.
   const parts = path.split('/')
   const fileBase = parts[parts.length - 1] ?? ''
@@ -102,7 +131,7 @@ export async function parseClaudeFile(
   const byMessageId = new Map<string, { row: ClaudeRow; offset: number }>()
   const noIdRows: { row: ClaudeRow; offset: number }[] = []
 
-  for await (const line of readJsonlLines(path)) {
+  for await (const line of readJsonlLines(path, { startOffset: resumeFromOffset })) {
     const row = line.parsed as ClaudeRow
     if (row?.message?.usage === undefined) continue
     const messageId = row.message.id
@@ -184,6 +213,15 @@ export async function parseClaudeFile(
   for (const [id, { row, offset }] of byMessageId) finalize(row, offset, id)
   for (const { row, offset } of noIdRows) finalize(row, offset, null)
 
+  if (fileCache !== undefined && fileSize > 0) {
+    fileCache.upsert({
+      path,
+      mtime: fileMtime,
+      lastParsedAt: Date.now(),
+      lastOffset: fileSize,
+    })
+  }
+
   return events
 }
 
@@ -193,7 +231,7 @@ export async function parseClaude(opts: ClaudeCodeParseOptions): Promise<UsageEv
   const all: UsageEvent[] = []
   for (const f of files) {
     try {
-      const events = await parseClaudeFile(f, opts.pricing)
+      const events = await parseClaudeFile(f, opts.pricing, opts.fileCache)
       all.push(...events)
     } catch (err) {
       // Skip unreadable files — log and continue.

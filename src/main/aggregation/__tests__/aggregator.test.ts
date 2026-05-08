@@ -69,6 +69,43 @@ describe('Aggregator', () => {
     expect(rows.map((r) => r.costMicroUsd)).toEqual([5000n, 3000n, 1000n])
   })
 
+  it('forecast returns null when fewer than 3 days of data', () => {
+    repo.upsertMany([
+      makeEvent({ id: '1', timestamp: todayStart, computedCostMicroUsd: 1000n }),
+      makeEvent({ id: '2', timestamp: todayStart - 86_400_000, computedCostMicroUsd: 2000n }),
+    ])
+    expect(agg.forecast(now)).toBeNull()
+  })
+
+  it('forecast linearly projects MTD to month-end', () => {
+    // May 2026 has 31 days. Today simulated as May 6 = day 6.
+    // Seed days 1-6 with consistent $1/day cost.
+    const may1 = new Date('2026-05-01T12:00:00.000Z')
+    const may1Start = startOfDayMs(may1)
+    const eventsList = []
+    for (let d = 0; d < 6; d++) {
+      eventsList.push(
+        makeEvent({
+          id: `d${d}`,
+          timestamp: may1Start + d * 86_400_000 + 1000,
+          computedCostMicroUsd: 1_000_000n, // $1/day
+        }),
+      )
+    }
+    repo.upsertMany(eventsList)
+    const sim = new Date('2026-05-06T12:00:00.000Z')
+    const f = agg.forecast(sim)
+    expect(f).not.toBeNull()
+    if (f === null) return
+    expect(f.daysInMonth).toBe(31)
+    expect(f.daysElapsed).toBe(6)
+    expect(f.spentMicroUsd).toBe(6_000_000n)
+    // Linear projection: 6_000_000 × 31 / 6 = 31_000_000 ($31)
+    expect(f.estimateMicroUsd).toBe(31_000_000n)
+    // Stddev of [1,1,1,1,1,1] is 0 → band = 0.
+    expect(f.confidenceBandMicroUsd).toBe(0n)
+  })
+
   it('snapshot covers today/7d/30d ranges with consistent boundaries', () => {
     const sixDaysAgo = todayStart - 6 * 24 * 3_600_000
     const eightDaysAgo = todayStart - 8 * 24 * 3_600_000

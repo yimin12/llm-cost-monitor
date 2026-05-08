@@ -4,10 +4,12 @@ import { emptySnapshot, type UsageSnapshot } from '@shared/snapshot'
 import { parseCodex, resolveCodexHome } from '../../parsers/codex'
 import type { PricingTable } from '../../pricing/pricing-table'
 import type { EventRepository } from '../../storage/event-repository'
+import type { FileCache } from '../../storage/file-cache'
 
 export interface OpenAIProviderDeps {
   pricing: PricingTable
   events: EventRepository
+  fileCache: FileCache
 }
 
 export class OpenAIProvider implements AIProvider {
@@ -46,7 +48,10 @@ export class OpenAIProvider implements AIProvider {
   }
 
   private async refreshImpl(): Promise<UsageSnapshot> {
-    const events = await parseCodex({ pricing: this.deps.pricing })
+    const events = await parseCodex({
+      pricing: this.deps.pricing,
+      fileCache: this.deps.fileCache,
+    })
     if (events.length > 0) this.deps.events.upsertMany(events)
     const snap = emptySnapshot(this.id)
     this.latest = snap

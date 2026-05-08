@@ -3,6 +3,7 @@ import type {
   CostByModel,
   CostByProject,
   CostByProvider,
+  MonthlyForecast,
   RangeTotal,
 } from '@shared/aggregates'
 import type { DatabaseHandle } from '../storage/db'
@@ -34,11 +35,23 @@ export function startOfDayMs(now: Date = new Date()): number {
   return d.getTime()
 }
 
+export function startOfMonthMs(now: Date = new Date()): number {
+  const d = new Date(now)
+  d.setDate(1)
+  d.setHours(0, 0, 0, 0)
+  return d.getTime()
+}
+
+export function daysInMonth(now: Date = new Date()): number {
+  return new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+}
+
 export class Aggregator {
   private readonly rangeStmt
   private readonly providerRangeStmt
   private readonly modelRangeStmt
   private readonly projectRangeStmt
+  private readonly perDayStmt
 
   constructor(private readonly db: DatabaseHandle) {
     const rangeColumns = `
@@ -93,6 +106,20 @@ export class Aggregator {
       GROUP BY project
       ORDER BY cost DESC
       LIMIT @limit
+    `)
+    // Per-day rollup over a window. Day key uses local-tz day index by flooring
+    // (timestamp - tz_offset_ms) to a 24h boundary; we let SQLite group on the
+    // computed bucket. The bucket math lives in JS and is passed in as @bucket.
+    this.perDayStmt = db.prepare<
+      { start: number; end: number; bucket: number },
+      { day_idx: bigint; cost: bigint }
+    >(`
+      SELECT (timestamp / @bucket) AS day_idx,
+             COALESCE(SUM(computed_cost_micro_usd), 0) AS cost
+      FROM events
+      WHERE timestamp >= @start AND timestamp < @end
+      GROUP BY day_idx
+      ORDER BY day_idx ASC
     `)
   }
 
@@ -150,6 +177,57 @@ export class Aggregator {
       }))
   }
 
+  // Per-day cost rollup (micro-USD) over [startMs, endMs). Returns one entry
+  // per day that has at least one event.
+  perDayCost(startMs: number, endMs: number): bigint[] {
+    const dayMs = 24 * 60 * 60 * 1000
+    return this.perDayStmt
+      .all({ start: startMs, end: endMs, bucket: dayMs })
+      .map((r) => readBigint(r.cost))
+  }
+
+  // Linear month-end forecast with a 1σ confidence band.
+  // Returns null if < 3 days of data in the month (under-determined).
+  forecast(now: Date = new Date()): MonthlyForecast | null {
+    const monthStart = startOfMonthMs(now)
+    const todayStart = startOfDayMs(now)
+    const todayEnd = todayStart + 24 * 60 * 60 * 1000
+    const dim = daysInMonth(now)
+    const daysElapsed = Math.floor((todayEnd - monthStart) / (24 * 60 * 60 * 1000))
+
+    const perDay = this.perDayCost(monthStart, todayEnd)
+    if (perDay.length < 3) return null
+
+    let spent = 0n
+    for (const c of perDay) spent += c
+
+    const estimate =
+      daysElapsed > 0
+        ? (spent * BigInt(dim)) / BigInt(daysElapsed)
+        : 0n
+
+    // Stddev over per-day costs. Compute in number-space for sqrt; precision is
+    // fine for the band since it's already a guess. Convert back to bigint.
+    const perDayN = perDay.map((b) => Number(b))
+    const mean = perDayN.reduce((a, b) => a + b, 0) / perDayN.length
+    const variance =
+      perDayN.reduce((acc, x) => acc + (x - mean) ** 2, 0) / perDayN.length
+    const stddev = Math.sqrt(variance)
+    const remainingDays = Math.max(0, dim - daysElapsed)
+    // Wilson-ish band: 1σ × sqrt(remaining_days). One-sided width.
+    const bandFloat = stddev * Math.sqrt(remainingDays)
+    const band = BigInt(Math.round(bandFloat))
+
+    return {
+      monthStartMs: monthStart,
+      daysElapsed,
+      daysInMonth: dim,
+      spentMicroUsd: spent,
+      estimateMicroUsd: estimate,
+      confidenceBandMicroUsd: band,
+    }
+  }
+
   snapshot(now: Date = new Date()): AggregateSnapshot {
     const todayStart = startOfDayMs(now)
     const todayEnd = todayStart + 24 * 60 * 60 * 1000
@@ -165,6 +243,7 @@ export class Aggregator {
       byProvider30d: this.byProvider(thirtyDayStart, todayEnd),
       topModelsToday: this.topModels(todayStart, todayEnd, 5),
       topProjectsToday: this.topProjects(todayStart, todayEnd, 5),
+      forecast: this.forecast(now),
     }
   }
 }

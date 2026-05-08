@@ -8,6 +8,7 @@ import type { PricingTable } from './pricing/pricing-table'
 import { ProviderRegistry } from './providers/registry'
 import { openDatabase, type DatabaseHandle } from './storage/db'
 import { EventRepository } from './storage/event-repository'
+import { FileCache } from './storage/file-cache'
 
 app.on('window-all-closed', () => {
   // Tray-only app — never quit on window close.
@@ -135,7 +136,8 @@ void app.whenReady().then(async () => {
   console.log(`storage opened at ${dbPath} (${events.count()} events)`)
 
   aggregator = new Aggregator(db)
-  providers = new ProviderRegistry({ pricing, events })
+  const fileCache = new FileCache(db)
+  providers = new ProviderRegistry({ pricing, events, fileCache })
 
   registerIpcHandlers({ pricing, events, aggregator, providers })
 

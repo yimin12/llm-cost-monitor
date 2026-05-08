@@ -31,6 +31,20 @@ export interface RangeTotal {
   eventCount: number
 }
 
+// Month-to-date forecast for the current calendar month. `null` means
+// insufficient data (< 3 days of usage in the month).
+export interface MonthlyForecast {
+  monthStartMs: number
+  daysElapsed: number
+  daysInMonth: number
+  spentMicroUsd: bigint
+  // Linear projection: spent / daysElapsed × daysInMonth.
+  estimateMicroUsd: bigint
+  // ±1σ band over per-day costs scaled to remaining days. Single-sided width
+  // in micro-USD. Renderer uses estimate ± confidenceBand.
+  confidenceBandMicroUsd: bigint
+}
+
 export interface AggregateSnapshot {
   generatedAt: number
   today: RangeTotal
@@ -40,4 +54,5 @@ export interface AggregateSnapshot {
   byProvider30d: CostByProvider[]
   topModelsToday: CostByModel[]
   topProjectsToday: CostByProject[]
+  forecast: MonthlyForecast | null
 }

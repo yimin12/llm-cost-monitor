@@ -121,6 +121,30 @@ export function App(): JSX.Element {
         </div>
       </section>
 
+      {agg.forecast !== null && (
+        <section className="forecast">
+          <div className="forecast-row">
+            <span className="forecast-label">Spent so far</span>
+            <span className="forecast-value">{microToUsd(agg.forecast.spentMicroUsd)}</span>
+            <span className="forecast-sub">
+              day {agg.forecast.daysElapsed}/{agg.forecast.daysInMonth}
+            </span>
+          </div>
+          <div className="forecast-row">
+            <span className="forecast-label">Month-end est.</span>
+            <span className="forecast-value">{microToUsd(agg.forecast.estimateMicroUsd)}</span>
+            <span className="forecast-sub">
+              ± {microToUsd(agg.forecast.confidenceBandMicroUsd)}
+            </span>
+          </div>
+        </section>
+      )}
+      {agg.forecast === null && (
+        <section className="forecast forecast-empty">
+          <span>Need ≥ 3 days of data for a month-end forecast.</span>
+        </section>
+      )}
+
       <section className="block">
         <h3>By provider — today</h3>
         {agg.byProviderToday.length === 0 ? (
@@ -211,6 +235,13 @@ export function App(): JSX.Element {
             </li>
           ))}
         </ul>
+      </section>
+
+      <section className="privacy">
+        <p className="privacy-line">
+          <strong>On-device only.</strong> Session logs scanned locally; no
+          telemetry, no cloud sync.
+        </p>
       </section>
     </div>
   )
