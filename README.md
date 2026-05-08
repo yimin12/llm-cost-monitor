@@ -9,30 +9,44 @@ Open-source **macOS + Linux** tray app that tracks LLM token usage and cost acro
 - Reads on-disk session logs from **Claude Code** (`~/.claude/projects/`), **OpenAI Codex** (`~/.codex/sessions/`), and **Google Gemini** (`~/.gemini/tmp/*/chats/`).
 - Dedupes by message id (Claude), per-call last_token_usage (Codex), per-message id (Gemini).
 - Costs computed via 2,250-model LiteLLM pricing snapshot, integer micro-USD throughout.
-- SQLite event store at `~/Library/Application Support/llm-cost-monitor/usage.db` (macOS) / `${XDG_DATA_HOME}/llm-cost-monitor/usage.db` (Linux). Schema v1 with WAL journaling.
+- **Dev branch (`feat/auth-gmail`):** event store is **Postgres 17 in Docker** (`127.0.0.1:5433`). Schema v1, BIGINT cost as JS bigint via `pg.types.setTypeParser`. `main` still on better-sqlite3.
 - **Refresh** on app start + every 5 minutes + manual button.
 
 See [`plan.md`](./plan.md) for the project plan and [`docs/architecture.md`](./docs/architecture.md) for the decision record.
 
-## Quickstart
+## Quickstart (dev — branch `feat/auth-gmail`)
+
+This branch is mid-flight on the Postgres + auth migration. Dev requires
+**Docker Desktop** running.
 
 ```sh
 git clone https://github.com/<owner>/llm-cost-monitor.git
 cd llm-cost-monitor
+git checkout feat/auth-gmail
 npm install
-npm run dev      # auto-runs `electron-builder install-app-deps` first
+npm run dev      # predev: docker compose up -d postgres + electron-builder rebuild
 ```
 
-Click the tray icon that appears in the menubar (macOS) or system tray (Linux) to open the dropdown.
+The `predev` hook starts a Postgres 17 container (bound to `127.0.0.1:5433`),
+then runs migrations on first connect, then ingests `~/.claude/`, `~/.codex/`,
+and `~/.gemini/` into the new database. Click the tray icon to view costs.
 
-### Native module rebuild (better-sqlite3)
-
-`better-sqlite3` is a native module and needs different binaries for Node (tests) vs Electron (the running app). The `predev` hook handles the Electron rebuild automatically. Before running tests after running the app, flip back to the Node ABI:
+Useful db commands:
 
 ```sh
-npm run rebuild:node    # before `npm test`
-npm run rebuild:electron  # before `npm run dev`  (also runs automatically via predev)
+npm run db:up      # start postgres only
+npm run db:psql    # interactive psql shell against the dev DB
+npm run db:logs    # tail postgres logs
+npm run db:reset   # nuke + recreate (destroys all stored events)
+npm run db:down    # stop, keep volume
 ```
+
+### Native module rebuild (better-sqlite3 — for shipped builds only)
+
+`better-sqlite3` is still the storage backend for **shipped binaries**
+(SQLite, no Docker dependency). Dev uses Postgres exclusively. The
+`rebuild:electron` / `rebuild:node` scripts are kept for the eventual
+shipped-build SQLite path.
 
 > **Linux / GNOME note:** GNOME removed system-tray support. Install the [AppIndicator and KStatusNotifierItem Support](https://extensions.gnome.org/extension/615/appindicator-support/) extension. KDE Plasma, XFCE, Cinnamon, MATE, and LXQt work natively.
 
@@ -40,7 +54,7 @@ npm run rebuild:electron  # before `npm run dev`  (also runs automatically via p
 
 - **Electron + TypeScript** main process: parsers, SQLite, file watchers, providers.
 - **React + Vite** renderer: the dropdown UI.
-- **`better-sqlite3`** for storage; **`chokidar`** for file watching; **vendored LiteLLM JSON** for pricing (2,250 models).
+- **`pg`** + Postgres 17 (dev) for storage; **`better-sqlite3`** kept for shipped builds; **vendored LiteLLM JSON** for pricing (2,250 models).
 - **`electron-builder`** outputs: `.dmg` (macOS) + `.deb` and `.AppImage` (Linux).
 - **`electron-updater`** + GitHub Releases for auto-updates.
 

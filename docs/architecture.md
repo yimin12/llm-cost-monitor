@@ -197,54 +197,19 @@ For "current model + context %": use the last assistant `usage`, sum `(input + c
 
 ---
 
-## D9. Storage — better-sqlite3 (revised library, same schema)
+## D9. Storage — Postgres in dev, better-sqlite3 in shipped builds (revised 2026-05-07)
 
-**Decision (revised).** SQLite via `better-sqlite3` (synchronous, fast, zero ceremony — perfect for a single-process Electron main with light-burst writes). Database at `<app data>/usage.db`. **Same schema** as the SwiftUI plan; integer micro-USD for cost, separate `events` / `files` / `pricing_overrides` / `schema_version` tables.
+**Decision (revised again on `feat/auth-gmail`).** Dev runs **PostgreSQL 17 in Docker** (bound to `127.0.0.1:5433`, container `llm-cost-monitor-postgres`). Shipped builds (`.dmg` / `.AppImage`) keep **better-sqlite3** so end users don't need Docker. Both back ends share the same logical schema (events / files / pricing_overrides / schema_version) and the same `EventRepository` API surface — async on Postgres, async-wrapped sync on SQLite. See [`docs/auth-plan.md`](./auth-plan.md) §3 for the full reasoning.
 
-```sql
-CREATE TABLE events (
-  id TEXT PRIMARY KEY,
-  provider TEXT NOT NULL,
-  provider_raw_tag TEXT,
-  model TEXT NOT NULL,
-  timestamp INTEGER NOT NULL,                -- epoch ms
-  project TEXT,
-  project_raw_slug TEXT,
-  session_id TEXT,
-  message_id TEXT,
-  input_tokens INTEGER NOT NULL DEFAULT 0,
-  output_tokens INTEGER NOT NULL DEFAULT 0,
-  cache_read_tokens INTEGER NOT NULL DEFAULT 0,
-  cache_creation_5m_tokens INTEGER NOT NULL DEFAULT 0,
-  cache_creation_1h_tokens INTEGER NOT NULL DEFAULT 0,
-  reasoning_tokens INTEGER,
-  tool_call_count INTEGER,
-  latency_ms INTEGER,
-  computed_cost_micro_usd INTEGER NOT NULL,  -- micro-USD; safe in INTEGER (53-bit JS number range covers ~9e15)
-  pricing_snapshot_version TEXT NOT NULL,
-  source_file TEXT NOT NULL,
-  source_line_offset INTEGER NOT NULL
-);
-CREATE INDEX events_timestamp_idx ON events(timestamp DESC);
-CREATE INDEX events_provider_model_idx ON events(provider, model);
-CREATE INDEX events_project_idx ON events(project);
+**The Postgres-flavored DDL** (canonical now; the SQLite version becomes a parallel implementation when the shipped path lands):
 
-CREATE TABLE files (path TEXT PRIMARY KEY, mtime INTEGER NOT NULL,
-                    last_parsed_at INTEGER NOT NULL, last_offset INTEGER NOT NULL DEFAULT 0);
+See [`migrations/0001_init.sql`](../migrations/0001_init.sql) for the canonical Postgres DDL. Differences from the legacy SQLite version: `INTEGER` → `BIGINT` everywhere we store epoch-ms or 64-bit counters; `INSERT … VALUES (1) ON CONFLICT (version) DO NOTHING` for idempotent re-runs; PG-flavored `CREATE TABLE IF NOT EXISTS` syntax.
 
-CREATE TABLE pricing_overrides (model TEXT PRIMARY KEY,
-                                input_per_m INTEGER NOT NULL,
-                                output_per_m INTEGER NOT NULL,
-                                cache_write_per_m INTEGER, cache_read_per_m INTEGER,
-                                source TEXT NOT NULL);
+**Why `pg` (node-postgres).** Mature, every codebase uses it, has built-in pool. We override the BIGINT type-parser (`pg.types.setTypeParser(20, BigInt)`) so JS bigint flows through unchanged. SUM(BIGINT) returns NUMERIC by default, so all aggregates explicitly `::bigint` cast — see `src/main/aggregation/aggregator.ts`.
 
-CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
-INSERT INTO schema_version VALUES (1);
-```
+**Why keep `better-sqlite3` for shipped builds.** Distributing Postgres-in-Docker as a runtime dep would make the `.dmg` / `.AppImage` workflow miserable. SQLite preserves the "just runs" property. A backend-selection layer (interface + factory based on `process.env.NODE_ENV` or `app.isPackaged`) is the next storage slice; for now, `feat/auth-gmail` is dev-only.
 
-**Why `better-sqlite3`.** Synchronous-by-design (no callback hell), 10× the throughput of `sqlite3`-async-with-callbacks for this workload, written in C++ + N-API so it ships pre-built. Native binaries are auto-rebuilt at `electron-builder` time per platform.
-
-**Why not Prisma / Drizzle / Knex.** ORMs are friction for a 4-table schema with stable, simple queries. Plain SQL via `better-sqlite3.prepare()` is more debuggable.
+**Why not Prisma / Drizzle / Knex.** ORMs are friction for a 4-table schema with stable, simple queries. Plain SQL with a tiny `@name → $N` named-param translator (`src/main/storage/db-utils.ts`) keeps the SQL readable and the runtime debuggable.
 
 ---
 

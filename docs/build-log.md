@@ -7,10 +7,47 @@ Companion docs:
 - [`docs/architecture.md`](./architecture.md) — decision record D1–D15
 - [`docs/cost-validation.md`](./cost-validation.md) — cost-accuracy audit
 - [`docs/cli-pulse-feature-spec.md`](./cli-pulse-feature-spec.md) — competitor reverse-engineering
+- [`docs/auth-plan.md`](./auth-plan.md) — auth + Postgres plan (active on `feat/auth-gmail`)
 
 ---
 
-## 2026-05-07 — Current state
+## 2026-05-07 (later) — Postgres migration on `feat/auth-gmail`
+
+User locked **Option A** (identity-only Sign in with Google) and
+**Postgres-in-Docker** for relational persistence. Dev-only; shipped builds
+keep SQLite. Single branch for both.
+
+**Slice 0 (Postgres bring-up) done autonomously:**
+- `docker-compose.yml` — postgres:17-alpine, `127.0.0.1:5433`, named volume
+- `migrations/0001_init.sql` — schema v1 in Postgres BIGINT-everywhere flavor
+- `src/main/storage/connect.ts` — pg.Pool with retry-with-backoff + bigint typeparser
+- `src/main/storage/migrations.ts` — file-based migration runner
+- `src/main/storage/db-utils.ts` — `@name → $N` translator
+- `src/main/storage/{event-repository,file-cache}.ts` — async ports
+- `src/main/aggregation/aggregator.ts` — async port; every `SUM(BIGINT)` cast `::bigint` to defeat NUMERIC return
+- All parsers + providers + IPC awaited
+- Tests ported to per-file ephemeral Postgres DBs via `test-helpers.ts`
+- `src/main/storage/db.ts` (better-sqlite3 entry) deleted
+
+**End-to-end validated:**
+- Postgres 17.9 healthy on `127.0.0.1:5433`
+- `storage migrated to v1` on first connect
+- 1,063 events ingested across Anthropic ($104) / OpenAI ($64) / Google ($0.02)
+- 31 files in mtime cache
+- 47/47 vitest cases green
+
+**OAuth quota (CLI Pulse P1) deferred** — user's Claude credentials are in
+macOS Keychain, not in `~/.claude/.credentials.json` on this machine.
+
+**Deferred follow-ups on this branch:**
+- SQLite-fallback for shipped builds (interface + factory layer)
+- `bin/import-from-sqlite.ts` (currently re-derived from JSONL on refresh)
+- Slice A1+ — Google Cloud Console OAuth client + identity flow (waiting
+  on user to walk through `auth-plan.md` §8)
+
+---
+
+## 2026-05-07 — Current state on `main`
 
 **Repo:** `https://github.com/yimin12/llm-cost-monitor` (private). Commits on `main`:
 
