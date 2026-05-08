@@ -20,10 +20,13 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     snapshotVersion: deps.pricing.snapshotVersion,
     modelCount: deps.pricing.modelCount,
   }))
-  ipcMain.handle(IPC.STORAGE_INFO, () => ({
-    eventCount: deps.events.count(),
+  ipcMain.handle(IPC.STORAGE_INFO, async () => ({
+    eventCount: await deps.events.count(),
   }))
-  ipcMain.handle(IPC.AGGREGATES, (): AggregateSnapshot => deps.aggregator.snapshot())
+  ipcMain.handle(
+    IPC.AGGREGATES,
+    async (): Promise<AggregateSnapshot> => deps.aggregator.snapshot(),
+  )
   ipcMain.handle(IPC.PROVIDERS_LIST, async (): Promise<ProviderListEntry[]> => {
     return deps.providers.describe()
   })

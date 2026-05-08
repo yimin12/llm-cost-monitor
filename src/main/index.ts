@@ -6,9 +6,10 @@ import { broadcastUsageUpdated, registerIpcHandlers } from './ipc'
 import { loadBundledPricing } from './pricing/load-bundled'
 import type { PricingTable } from './pricing/pricing-table'
 import { ProviderRegistry } from './providers/registry'
-import { openDatabase, type DatabaseHandle } from './storage/db'
+import { openPool, type Pool } from './storage/connect'
 import { EventRepository } from './storage/event-repository'
 import { FileCache } from './storage/file-cache'
+import { runMigrations } from './storage/migrations'
 
 app.on('window-all-closed', () => {
   // Tray-only app — never quit on window close.
@@ -17,7 +18,7 @@ app.on('window-all-closed', () => {
 let tray: Tray | null = null
 let dropdownWin: BrowserWindow | null = null
 let pricing: PricingTable | null = null
-let db: DatabaseHandle | null = null
+let pool: Pool | null = null
 let events: EventRepository | null = null
 let providers: ProviderRegistry | null = null
 let aggregator: Aggregator | null = null
@@ -108,10 +109,10 @@ function toggleDropdown(): void {
   dropdownWin.focus()
 }
 
-function updateTrayTitle(): void {
+async function updateTrayTitle(): Promise<void> {
   if (tray === null || aggregator === null) return
-  const today = aggregator.snapshot().today
-  const usd = Number(today.costMicroUsd) / 1_000_000
+  const snap = await aggregator.snapshot()
+  const usd = Number(snap.today.costMicroUsd) / 1_000_000
   const formatted = `$${usd.toFixed(2)}`
   if (process.platform === 'darwin') {
     tray.setTitle(formatted)
@@ -130,19 +131,41 @@ void app.whenReady().then(async () => {
     `pricing snapshot ${pricing.snapshotVersion}, ${pricing.modelCount} models loaded`,
   )
 
-  const dbPath = path.join(app.getPath('userData'), 'usage.db')
-  db = openDatabase(dbPath)
-  events = new EventRepository(db)
-  console.log(`storage opened at ${dbPath} (${events.count()} events)`)
+  // Postgres-in-Docker (dev) — see docs/auth-plan.md §3 + docker-compose.yml.
+  // Shipped builds will swap in a SQLite implementation in a later slice.
+  try {
+    pool = await openPool({})
+  } catch (err) {
+    console.error(`postgres unreachable: ${(err as Error).message}`)
+    console.error('hint: run `npm run db:up` to start the dev container')
+    app.quit()
+    return
+  }
+  // electron-vite emits CommonJS into out/main/index.js, so __dirname is
+  // out/main; migrations live two levels up at the repo root in dev, and
+  // bundled at app.getAppPath()/migrations in production builds.
+  const migrationsDir = app.isPackaged
+    ? path.join(app.getAppPath(), 'migrations')
+    : path.resolve(__dirname, '../../migrations')
+  const migrationStatus = await runMigrations(pool, migrationsDir)
+  console.log(
+    `storage migrated to v${migrationStatus.appliedVersion}` +
+      (migrationStatus.ranThisRun.length > 0
+        ? ` (ran ${migrationStatus.ranThisRun.join(',')})`
+        : ''),
+  )
+  events = new EventRepository(pool)
+  const initialCount = await events.count()
+  console.log(`storage ready (${initialCount} events)`)
 
-  aggregator = new Aggregator(db)
-  const fileCache = new FileCache(db)
+  aggregator = new Aggregator(pool)
+  const fileCache = new FileCache(pool)
   providers = new ProviderRegistry({ pricing, events, fileCache })
 
   registerIpcHandlers({ pricing, events, aggregator, providers })
 
   app.on('before-quit', () => {
-    db?.close()
+    void pool?.end().catch(() => {})
   })
 
   const iconPath = getIconPath()
@@ -161,21 +184,21 @@ void app.whenReady().then(async () => {
 
   const runRefresh = (label: string): void => {
     if (providers === null) return
-    void providers
-      .refreshAll()
-      .then((results) => {
-        const total = events?.count() ?? 0
+    void (async () => {
+      try {
+        const results = await providers.refreshAll()
+        const total = (await events?.count()) ?? 0
         console.log(
           `refresh ${label}: ${results
             .map((r) => `${r.provider}=${r.error ?? 'ok'}`)
             .join(', ')}; ${total} events stored`,
         )
-        updateTrayTitle()
+        await updateTrayTitle()
         broadcastUsageUpdated()
-      })
-      .catch((err: unknown) => {
+      } catch (err) {
         console.warn(`refresh ${label} failed: ${(err as Error).message}`)
-      })
+      }
+    })()
   }
 
   // Kick the initial refresh in the background — don't block startup.
