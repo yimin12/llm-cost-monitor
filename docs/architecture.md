@@ -294,12 +294,17 @@ Users add to `~/.claude/settings.json`:
 
 ---
 
-## D14. License + privacy (unchanged)
+## D14. License + privacy (revised 2026-05-08 for Sign in with Google)
 
 - **License:** MIT.
 - **Telemetry:** none. No analytics SDKs. No crash reporters that phone home. Opt-in error reporting opens GitHub Issues only.
-- **Data location:** all on the user's machine. The only network calls are: (a) `electron-updater` update check (configurable), (b) optional vendor API calls when the user pastes an API key.
+- **Data location:** all on the user's machine. Postgres (dev) and SQLite (shipped) both bind to localhost; encrypted refresh token in OS Keychain via `safeStorage`.
+- **Network calls actually made:**
+  - (a) `electron-updater` update check (configurable, future slice 15)
+  - (b) **OAuth round-trips with Google when the user explicitly signs in** — `accounts.google.com/o/oauth2/v2/auth`, `oauth2.googleapis.com/token`, `www.googleapis.com/oauth2/v3/certs`. The `id_token` is verified locally; the `refresh_token` is encrypted via `safeStorage` and used to silently mint a new `access_token` on each launch. **No usage data is uploaded.**
+  - (c) optional vendor API calls when the user pastes an API key for a provider (none yet implemented)
 - **Pricing JSON:** vendored, no remote fetch at runtime.
+- **Privacy doc:** [`docs/privacy.md`](./privacy.md) is the single source of truth for the trust statement, mirroring CLI Pulse §10's structure.
 
 ---
 

@@ -1,6 +1,6 @@
 # llm-cost-monitor
 
-Open-source **macOS + Linux** tray app that tracks LLM token usage and cost across the providers you actually use — Claude Code, OpenAI Codex, Gemini, Kimi, Qwen, and friends. Local-only, no telemetry, MIT.
+Open-source **macOS + Linux** tray app that tracks LLM token usage and cost across the providers you actually use — Claude Code, OpenAI Codex, Gemini, Kimi, Qwen, and friends. Local-only telemetry-free; **optional Sign in with Google for identity only — no usage data uploaded** ([`docs/privacy.md`](./docs/privacy.md)). MIT.
 
 **Status (2026-05-06):** Slices 1–9 done. **Working features:**
 

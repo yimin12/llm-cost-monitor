@@ -263,3 +263,16 @@ body {
   color: rgba(245, 245, 247, 0.75);
   font-weight: 600;
 }
+.privacy-line.subtle {
+  margin-top: 4px;
+  color: rgba(245, 245, 247, 0.4);
+  font-size: 9.5px;
+}
+.privacy-line code {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 9.5px;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 0 4px;
+  border-radius: 3px;
+  color: rgba(245, 245, 247, 0.55);
+}

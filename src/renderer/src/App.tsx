@@ -9,6 +9,7 @@ import type {
 } from '@shared/ipc-channels'
 
 import { AuthHeader } from './components/AuthHeader'
+import { PrivacyBanner } from './components/PrivacyBanner'
 
 declare global {
   interface Window {
@@ -247,12 +248,7 @@ export function App(): JSX.Element {
         </ul>
       </section>
 
-      <section className="privacy">
-        <p className="privacy-line">
-          <strong>On-device only.</strong> Session logs scanned locally; no
-          telemetry, no cloud sync.
-        </p>
-      </section>
+      <PrivacyBanner />
     </div>
   )
 }
