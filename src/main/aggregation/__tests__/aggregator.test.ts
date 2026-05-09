@@ -138,6 +138,57 @@ describe('Aggregator (Postgres)', () => {
     expect(snap.dailyCostMicroUsd).toHaveLength(14)
   })
 
+  it('providerLastSeen returns MAX(timestamp) per provider', async () => {
+    await repo.upsertMany([
+      makeEvent({ id: 'a1', timestamp: todayStart + 1000, provider: 'anthropic' }),
+      makeEvent({ id: 'a2', timestamp: todayStart + 5000, provider: 'anthropic' }),
+      makeEvent({ id: 'o1', timestamp: todayStart + 2000, provider: 'openai' }),
+    ])
+    const seen = await agg.providerLastSeen()
+    expect(seen['anthropic']).toBe(todayStart + 5000)
+    expect(seen['openai']).toBe(todayStart + 2000)
+    expect(seen['google']).toBeUndefined()
+  })
+
+  it('recentSessions groups by (provider, session_id), ordered by lastAt desc', async () => {
+    await repo.upsertMany([
+      // Session A: anthropic, 2 events spanning 5 minutes
+      makeEvent({ id: 'a1', timestamp: todayStart + 1_000, sessionId: 'sess-A', provider: 'anthropic', computedCostMicroUsd: 1000n }),
+      makeEvent({ id: 'a2', timestamp: todayStart + 301_000, sessionId: 'sess-A', provider: 'anthropic', computedCostMicroUsd: 2000n }),
+      // Session B: openai, single event much later → should sort first
+      makeEvent({ id: 'b1', timestamp: todayStart + 600_000, sessionId: 'sess-B', provider: 'openai', computedCostMicroUsd: 5000n }),
+      // Event with no session_id — must be excluded
+      makeEvent({ id: 'n1', timestamp: todayStart + 1000, sessionId: null, provider: 'google' }),
+    ])
+    const sessions = await agg.recentSessions(50)
+    expect(sessions).toHaveLength(2)
+    expect(sessions[0]!.sessionId).toBe('sess-B')
+    expect(sessions[0]!.provider).toBe('openai')
+    expect(sessions[0]!.eventCount).toBe(1)
+    expect(sessions[1]!.sessionId).toBe('sess-A')
+    expect(sessions[1]!.eventCount).toBe(2)
+    expect(sessions[1]!.costMicroUsd).toBe(3000n)
+    expect(sessions[1]!.firstAt).toBe(todayStart + 1_000)
+    expect(sessions[1]!.lastAt).toBe(todayStart + 301_000)
+  })
+
+  it('recentSessions respects limit', async () => {
+    const eventsList = []
+    for (let i = 0; i < 5; i++) {
+      eventsList.push(
+        makeEvent({
+          id: `s${i}`,
+          timestamp: todayStart + i * 1000,
+          sessionId: `sess-${i}`,
+          computedCostMicroUsd: 1000n,
+        }),
+      )
+    }
+    await repo.upsertMany(eventsList)
+    expect(await agg.recentSessions(2)).toHaveLength(2)
+    expect(await agg.recentSessions(10)).toHaveLength(5)
+  })
+
   it('snapshot covers today/7d/30d ranges with consistent boundaries', async () => {
     const sixDaysAgo = todayStart - 6 * 24 * 3_600_000
     const eightDaysAgo = todayStart - 8 * 24 * 3_600_000
