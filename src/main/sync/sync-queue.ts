@@ -149,7 +149,8 @@ export class SyncQueue {
     if (cfg.privacyLevel === 'aggregateOnly') {
       payloads = redactToDaily(pending, ctx)
     } else {
-      payloads = pending.map((e) => redactEvent(e, cfg.privacyLevel, ctx))
+      const level = cfg.privacyLevel
+      payloads = pending.map((e) => redactEvent(e, level, ctx))
     }
 
     const token = await this.getAccessToken()

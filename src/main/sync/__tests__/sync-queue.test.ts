@@ -96,7 +96,7 @@ describe('SyncQueue', () => {
       batchUpsert: vi.fn(async (_teamId, payloads, _token): Promise<BatchUpsertResponse> => {
         seenPayloads.push([...payloads])
         return {
-          accepted: payloads.map((p) => (p.kind === 'event' ? p.sync_event_id : `${p.date}|${p.provider}|${p.model}`)),
+          accepted: payloads.map((p: SyncPayload) => (p.kind === 'event' ? p.sync_event_id : `${p.date}|${p.provider}|${p.model}`)),
           duplicates: [],
           rejected: [],
           cursor: 1_700_000_001_000,
@@ -159,7 +159,7 @@ describe('SyncQueue', () => {
       batchUpsert: vi.fn(async (_t, payloads): Promise<BatchUpsertResponse> => {
         calls.push(payloads.length)
         return {
-          accepted: payloads.map((p) => (p.kind === 'event' ? p.sync_event_id : 'd')),
+          accepted: payloads.map((p: SyncPayload) => (p.kind === 'event' ? p.sync_event_id : 'd')),
           duplicates: [],
           rejected: [],
           cursor: 0,
@@ -192,7 +192,7 @@ describe('SyncQueue', () => {
         await new Promise((r) => setTimeout(r, 30))
         resolved++
         return {
-          accepted: payloads.map((p) => (p.kind === 'event' ? p.sync_event_id : 'd')),
+          accepted: payloads.map((p: SyncPayload) => (p.kind === 'event' ? p.sync_event_id : 'd')),
           duplicates: [],
           rejected: [],
           cursor: 0,
@@ -215,7 +215,7 @@ describe('SyncQueue', () => {
       batchUpsert: vi.fn(async (_t, payloads): Promise<BatchUpsertResponse> => {
         captured = [...payloads]
         return {
-          accepted: payloads.map((p) => (p.kind === 'daily' ? `${p.date}|${p.provider}|${p.model}` : 'x')),
+          accepted: payloads.map((p: SyncPayload) => (p.kind === 'daily' ? `${p.date}|${p.provider}|${p.model}` : 'x')),
           duplicates: [],
           rejected: [],
           cursor: 0,

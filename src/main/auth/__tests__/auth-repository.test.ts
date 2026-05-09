@@ -38,11 +38,11 @@ describe('AuthRepository (Postgres)', () => {
     repo = new AuthRepository(pool)
   })
 
-  it('schema_version is 2 after migrations', async () => {
+  it('schema_version is at v2+ after migrations (auth user table exists)', async () => {
     const r = await pool.query<{ max: number }>(
       'SELECT MAX(version) AS max FROM schema_version',
     )
-    expect(r.rows[0]?.max).toBe(2)
+    expect(r.rows[0]?.max ?? 0).toBeGreaterThanOrEqual(2)
   })
 
   it('upsertActive + findActive round-trip', async () => {

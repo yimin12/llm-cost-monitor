@@ -126,6 +126,7 @@ const fakeSettings: AppSettings = DEFAULT_SETTINGS
 
 export function installBrowserStub(): void {
   if (typeof window === 'undefined' || (window as unknown as { api?: unknown }).api) return
+  let cachedSettings: AppSettings = fakeSettings
   ;(window as unknown as { api: unknown }).api = {
     ping: async () => 'pong (browser-stub)',
     pricingInfo: async () => fakePricing,
@@ -133,7 +134,41 @@ export function installBrowserStub(): void {
     aggregates: async () => fakeSnapshot,
     providersList: async () => fakeProviders,
     providersRefresh: async () => fakeProviders.map((p) => ({ provider: p.id, error: null })),
-    settings: async () => fakeSettings,
+    settings: async () => cachedSettings,
+    setSettings: async (patch: Partial<AppSettings>) => {
+      cachedSettings = {
+        ...cachedSettings,
+        ...patch,
+        teamSync: { ...cachedSettings.teamSync, ...(patch.teamSync ?? {}) },
+      }
+      return cachedSettings
+    },
     onUsageUpdated: () => () => {},
+    onSettingsChanged: () => () => {},
+    authCurrent: async () => ({ kind: 'signed-out' }),
+    authSignIn: async () => ({ kind: 'signed-out' }),
+    authSignOut: async () => ({ kind: 'signed-out' }),
+    onAuthStateChanged: () => () => {},
+    appQuit: async () => undefined,
+    dashboardUrl: async () => null,
+    openDashboard: async () => undefined,
+    syncStatus: async () => ({
+      configured: false,
+      enabled: false,
+      lastSyncAt: null,
+      pendingCount: 0,
+      lastError: null,
+      nodeId: 'demo-node-id',
+    }),
+    syncDrain: async () => ({
+      configured: false,
+      enabled: false,
+      lastSyncAt: Date.now(),
+      pendingCount: 0,
+      lastError: null,
+      nodeId: 'demo-node-id',
+    }),
+    syncTeamOverview: async () => null,
+    onSyncStatusChanged: () => () => {},
   }
 }

@@ -5,7 +5,7 @@ import { Aggregator } from './aggregation/aggregator'
 import { AuthRepository } from './auth/auth-repository'
 import { AuthService } from './auth/auth-service'
 import { KeychainStore } from './auth/keychain-store'
-import { broadcastUsageUpdated, registerIpcHandlers } from './ipc'
+import { broadcastSyncStatusChanged, broadcastUsageUpdated, registerIpcHandlers } from './ipc'
 import { loadBundledPricing } from './pricing/load-bundled'
 import type { PricingTable } from './pricing/pricing-table'
 import { ProviderRegistry } from './providers/registry'
@@ -14,6 +14,11 @@ import { openPool, type Pool } from './storage/connect'
 import { EventRepository } from './storage/event-repository'
 import { FileCache } from './storage/file-cache'
 import { runMigrations } from './storage/migrations'
+import { CursorRepository } from './sync/cursor-repository'
+import { NodeIdentityRepository } from './sync/node-identity'
+import { SyncQueue } from './sync/sync-queue'
+import { HttpSyncTransport } from './sync/transport'
+import { fetchTeamOverview } from './sync/team-overview-client'
 
 app.on('window-all-closed', () => {
   // Tray-only app — never quit on window close.
@@ -174,7 +179,52 @@ void app.whenReady().then(async () => {
   const keychain = new KeychainStore()
   const auth = new AuthService({ repo: authRepo, keychain })
 
-  registerIpcHandlers({ pricing, events, aggregator, providers, settings, auth })
+  // Cross-node sync. Queue is initialised even when sync is disabled so the
+  // status IPC works (returns nodeId, no traffic). The transport is only
+  // built when the user has configured a serverUrl — otherwise drains
+  // are a no-op.
+  const nodes = new NodeIdentityRepository(pool, {
+    appVersion: app.getVersion(),
+  })
+  await nodes.ensure()
+  const cursors = new CursorRepository(pool)
+  const eventsRepo = events
+  const buildSyncQueue = (): SyncQueue | null => {
+    const cfg = settings.get().teamSync
+    if (cfg.serverUrl === null || cfg.serverUrl.length === 0) return null
+    return new SyncQueue({
+      events: eventsRepo,
+      cursors,
+      nodes,
+      transport: new HttpSyncTransport({ baseUrl: cfg.serverUrl }),
+      getAccessToken: () => auth.accessTokenForSync(),
+    })
+  }
+  let syncQueue: SyncQueue | null = buildSyncQueue()
+  // Rebuild on serverUrl change so the user can flip backends without
+  // restarting the app.
+  settings.subscribe((s) => {
+    if (s.teamSync.serverUrl === null) {
+      syncQueue = null
+    } else {
+      syncQueue = buildSyncQueue()
+    }
+  })
+
+  registerIpcHandlers({
+    pricing,
+    events,
+    aggregator,
+    providers,
+    settings,
+    auth,
+    syncQueue,
+    fetchTeamOverview: async (teamId, token) => {
+      const baseUrl = settings.get().teamSync.serverUrl
+      if (baseUrl === null) return null
+      return fetchTeamOverview({ baseUrl, teamId, accessToken: token })
+    },
+  })
 
   // Best-effort silent restore — a stored refresh_token + active auth_user
   // row means we can mint a fresh access_token without any user gesture.
@@ -223,4 +273,42 @@ void app.whenReady().then(async () => {
   // requiring a manual click. Interval is read from settings.json
   // (refreshIntervalMs); changes require a restart until the edit UI ships.
   setInterval(() => runRefresh('periodic'), settings.get().refreshIntervalMs)
+
+  // Sync drain loop. Always armed — but the queue.drain() call is itself a
+  // cheap no-op when sync is disabled or unconfigured. Runs at the user's
+  // chosen interval (default 5 min) and broadcasts status to the renderer.
+  const runSyncDrain = async (): Promise<void> => {
+    if (syncQueue === null) return
+    const cfg = settings.get().teamSync
+    if (!cfg.enabled || cfg.teamId === null || cfg.userId === null) return
+    try {
+      const out = await syncQueue.drain({
+        enabled: true,
+        teamId: cfg.teamId,
+        userId: cfg.userId,
+        privacyLevel: cfg.privacyLevel,
+      })
+      const status = await syncQueue.getStatus({
+        enabled: true,
+        teamId: cfg.teamId,
+        userId: cfg.userId,
+        privacyLevel: cfg.privacyLevel,
+      })
+      broadcastSyncStatusChanged(status)
+      if (out.error !== null) {
+        console.warn(`sync drain: ${out.error}`)
+      } else if (out.uploaded > 0) {
+        console.log(
+          `sync drain: ${out.uploaded} sent, ${out.accepted} accepted, ` +
+            `${out.duplicates} dedup, ${out.rejected} rejected`,
+        )
+      }
+    } catch (err) {
+      console.warn(`sync drain crashed: ${(err as Error).message}`)
+    }
+  }
+  // First drain happens shortly after startup; subsequent ones every
+  // teamSync.intervalMs.
+  setTimeout(() => void runSyncDrain(), 10_000)
+  setInterval(() => void runSyncDrain(), settings.get().teamSync.intervalMs)
 })

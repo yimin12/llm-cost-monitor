@@ -10,6 +10,8 @@ import {
   type ProviderListEntry,
   type ProviderRefreshResult,
   type StorageInfo,
+  type SyncStatus,
+  type TeamOverview,
 } from '@shared/ipc-channels'
 
 contextBridge.exposeInMainWorld('api', {
@@ -23,10 +25,17 @@ contextBridge.exposeInMainWorld('api', {
   providersRefresh: (): Promise<ProviderRefreshResult[]> =>
     ipcRenderer.invoke(IPC.PROVIDERS_REFRESH) as Promise<ProviderRefreshResult[]>,
   settings: (): Promise<AppSettings> => ipcRenderer.invoke(IPC.SETTINGS_GET) as Promise<AppSettings>,
+  setSettings: (patch: Partial<AppSettings>): Promise<AppSettings> =>
+    ipcRenderer.invoke(IPC.SETTINGS_SET, patch) as Promise<AppSettings>,
   onUsageUpdated: (cb: () => void): (() => void) => {
     const listener = (): void => cb()
     ipcRenderer.on(EVENT.USAGE_UPDATED, listener)
     return () => ipcRenderer.removeListener(EVENT.USAGE_UPDATED, listener)
+  },
+  onSettingsChanged: (cb: (s: AppSettings) => void): (() => void) => {
+    const listener = (_e: unknown, s: AppSettings): void => cb(s)
+    ipcRenderer.on(EVENT.SETTINGS_CHANGED, listener)
+    return () => ipcRenderer.removeListener(EVENT.SETTINGS_CHANGED, listener)
   },
 
   authCurrent: (): Promise<AuthState> => ipcRenderer.invoke(IPC.AUTH_CURRENT) as Promise<AuthState>,
@@ -39,5 +48,17 @@ contextBridge.exposeInMainWorld('api', {
     const listener = (_event: unknown, state: AuthState): void => cb(state)
     ipcRenderer.on(EVENT.AUTH_STATE_CHANGED, listener)
     return () => ipcRenderer.removeListener(EVENT.AUTH_STATE_CHANGED, listener)
+  },
+
+  syncStatus: (): Promise<SyncStatus | null> =>
+    ipcRenderer.invoke(IPC.SYNC_STATUS) as Promise<SyncStatus | null>,
+  syncDrain: (): Promise<SyncStatus | null> =>
+    ipcRenderer.invoke(IPC.SYNC_DRAIN) as Promise<SyncStatus | null>,
+  syncTeamOverview: (): Promise<TeamOverview | null> =>
+    ipcRenderer.invoke(IPC.SYNC_TEAM_OVERVIEW) as Promise<TeamOverview | null>,
+  onSyncStatusChanged: (cb: (s: SyncStatus | null) => void): (() => void) => {
+    const listener = (_e: unknown, s: SyncStatus | null): void => cb(s)
+    ipcRenderer.on(EVENT.SYNC_STATUS_CHANGED, listener)
+    return () => ipcRenderer.removeListener(EVENT.SYNC_STATUS_CHANGED, listener)
   },
 })
