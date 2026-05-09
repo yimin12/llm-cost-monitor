@@ -132,7 +132,7 @@ const TABS: { id: TabId; label: string; icon: JSX.Element }[] = [
 const ACTIVE_TAB_KEY = 'lcm.activeTab'
 const PERIOD_KEY = 'lcm.period'
 
-type Period = 'today' | '7d' | '30d'
+type Period = 'today' | '7d' | '1m' | '6m' | '1y'
 
 function loadInitialTab(): TabId {
   try {
@@ -149,7 +149,10 @@ function loadInitialTab(): TabId {
 function loadInitialPeriod(): Period {
   try {
     const v = localStorage.getItem(PERIOD_KEY)
-    if (v === 'today' || v === '7d' || v === '30d') return v
+    if (v === 'today' || v === '7d' || v === '1m' || v === '6m' || v === '1y') return v
+    // Migration: users persisted '30d' before the period bar was widened
+    // to include 1m/6m/1y. Treat the legacy value as "1m" silently.
+    if (v === '30d') return '1m'
   } catch {
     /* */
   }

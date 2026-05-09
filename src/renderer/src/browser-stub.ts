@@ -43,6 +43,24 @@ const fakeSnapshot: AggregateSnapshot = {
     reasoningTokens: 151_000,
     eventCount: 312,
   },
+  last6m: {
+    costMicroUsd: usd(612.4),
+    inputTokens: 5_240_000,
+    outputTokens: 6_480_000,
+    cacheReadTokens: 1_240_000,
+    cacheCreationTokens: 410_000,
+    reasoningTokens: 820_000,
+    eventCount: 1_710,
+  },
+  last1y: {
+    costMicroUsd: usd(1_184.7),
+    inputTokens: 10_120_000,
+    outputTokens: 12_540_000,
+    cacheReadTokens: 2_410_000,
+    cacheCreationTokens: 790_000,
+    reasoningTokens: 1_580_000,
+    eventCount: 3_312,
+  },
   byProviderToday: [
     { provider: 'anthropic', costMicroUsd: usd(2.4), eventCount: 8 },
     { provider: 'openai', costMicroUsd: usd(1.2), eventCount: 3 },
@@ -53,6 +71,18 @@ const fakeSnapshot: AggregateSnapshot = {
     { provider: 'openai', costMicroUsd: usd(28.7), eventCount: 84 },
     { provider: 'google', costMicroUsd: usd(8.4), eventCount: 22 },
     { provider: 'deepseek', costMicroUsd: usd(3.1), eventCount: 8 },
+  ],
+  byProvider6m: [
+    { provider: 'anthropic', costMicroUsd: usd(394.2), eventCount: 1_086 },
+    { provider: 'openai', costMicroUsd: usd(155.6), eventCount: 462 },
+    { provider: 'google', costMicroUsd: usd(45.2), eventCount: 121 },
+    { provider: 'deepseek', costMicroUsd: usd(17.4), eventCount: 41 },
+  ],
+  byProvider1y: [
+    { provider: 'anthropic', costMicroUsd: usd(762.6), eventCount: 2_098 },
+    { provider: 'openai', costMicroUsd: usd(301.8), eventCount: 893 },
+    { provider: 'google', costMicroUsd: usd(87.5), eventCount: 234 },
+    { provider: 'deepseek', costMicroUsd: usd(32.8), eventCount: 87 },
   ],
   topModelsToday: [
     { provider: 'anthropic', model: 'claude-opus-4-7', costMicroUsd: usd(2.1), eventCount: 6 },

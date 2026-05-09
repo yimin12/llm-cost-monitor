@@ -391,13 +391,19 @@ export class Aggregator {
     const todayEnd = todayStart + DAY_MS
     const sevenDayStart = todayEnd - 7 * DAY_MS
     const thirtyDayStart = todayEnd - 30 * DAY_MS
+    const sixMonthStart = todayEnd - 180 * DAY_MS
+    const oneYearStart = todayEnd - 365 * DAY_MS
 
     const [
       today,
       last7d,
       last30d,
+      last6m,
+      last1y,
       byProviderToday,
       byProvider30d,
+      byProvider6m,
+      byProvider1y,
       topModelsToday,
       topProjectsToday,
       forecast,
@@ -409,8 +415,12 @@ export class Aggregator {
       this.rangeTotal(todayStart, todayEnd),
       this.rangeTotal(sevenDayStart, todayEnd),
       this.rangeTotal(thirtyDayStart, todayEnd),
+      this.rangeTotal(sixMonthStart, todayEnd),
+      this.rangeTotal(oneYearStart, todayEnd),
       this.byProvider(todayStart, todayEnd),
       this.byProvider(thirtyDayStart, todayEnd),
+      this.byProvider(sixMonthStart, todayEnd),
+      this.byProvider(oneYearStart, todayEnd),
       this.topModels(todayStart, todayEnd, 5),
       this.topProjects(todayStart, todayEnd, 5),
       this.forecast(now),
@@ -425,8 +435,12 @@ export class Aggregator {
       today,
       last7d,
       last30d,
+      last6m,
+      last1y,
       byProviderToday,
       byProvider30d,
+      byProvider6m,
+      byProvider1y,
       topModelsToday,
       topProjectsToday,
       forecast,

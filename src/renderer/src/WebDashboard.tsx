@@ -20,13 +20,21 @@ import {
 // `window.api` is declared once in App.tsx (single source of truth across the
 // renderer). Both surfaces consume the same preload bridge.
 
-type Period = 'today' | '7d' | '30d'
+type Period = 'today' | '7d' | '1m' | '6m' | '1y'
 
 const PERIOD_KEY = 'lcm.web.period'
+const PERIOD_LABEL: Record<Period, string> = {
+  today: 'Today',
+  '7d': '7d',
+  '1m': '1m',
+  '6m': '6m',
+  '1y': '1y',
+}
 function loadInitialPeriod(): Period {
   try {
     const v = localStorage.getItem(PERIOD_KEY)
-    if (v === 'today' || v === '7d' || v === '30d') return v
+    if (v === 'today' || v === '7d' || v === '1m' || v === '6m' || v === '1y') return v
+    if (v === '30d') return '1m'
   } catch {
     /* */
   }
@@ -89,8 +97,28 @@ export function WebDashboard(): JSX.Element {
   // Pre-hook computations must run unconditionally — Rules of Hooks require
   // useAnimatedNumber to be called every render in the same order, so we can't
   // gate it behind the `agg === null` early return below.
-  const range = agg === null ? null : period === 'today' ? agg.today : period === '7d' ? agg.last7d : agg.last30d
-  const providerRows = agg === null ? [] : period === 'today' ? agg.byProviderToday : agg.byProvider30d
+  const range =
+    agg === null
+      ? null
+      : period === 'today'
+        ? agg.today
+        : period === '7d'
+          ? agg.last7d
+          : period === '1m'
+            ? agg.last30d
+            : period === '6m'
+              ? agg.last6m
+              : agg.last1y
+  const providerRows =
+    agg === null
+      ? []
+      : period === 'today'
+        ? agg.byProviderToday
+        : period === '6m'
+          ? agg.byProvider6m
+          : period === '1y'
+            ? agg.byProvider1y
+            : agg.byProvider30d
   const tokens = range === null ? 0 : range.inputTokens + range.outputTokens
   const animatedDollar = useAnimatedNumber(range === null ? 0 : Number(range.costMicroUsd) / 1_000_000)
 
@@ -174,7 +202,7 @@ export function WebDashboard(): JSX.Element {
             </p>
           </div>
           <div className="web-period" role="tablist">
-            {(['today', '7d', '30d'] as const).map((k) => (
+            {(['today', '7d', '1m', '6m', '1y'] as const).map((k) => (
               <button
                 key={k}
                 type="button"
@@ -183,7 +211,7 @@ export function WebDashboard(): JSX.Element {
                 className={period === k ? 'web-period-tab active' : 'web-period-tab'}
                 onClick={() => setPeriod(k)}
               >
-                {k === 'today' ? 'Today' : k === '7d' ? 'Last 7 days' : 'Last 30 days'}
+                {PERIOD_LABEL[k]}
               </button>
             ))}
           </div>
@@ -192,7 +220,7 @@ export function WebDashboard(): JSX.Element {
         {/* KPI row */}
         <section className="web-kpi-row">
           <article className="web-kpi web-kpi-hero">
-            <span className="web-kpi-label">{period === 'today' ? 'Today' : `Last ${period}`}</span>
+            <span className="web-kpi-label">{period === 'today' ? 'Today' : `Last ${PERIOD_LABEL[period]}`}</span>
             <span className="web-kpi-value">{animatedDollarText}</span>
             <span className="web-kpi-sub">
               {range.eventCount.toLocaleString()} calls · {formatTokens(tokens)} tokens
