@@ -25,19 +25,22 @@ body {
    Electron tray panel — see main.tsx for the renderer fork. */
 
 :root {
-  --bg-base: 16, 18, 24;
-  --fg: 245, 245, 247;
-  --fg-dim: 174, 174, 178;
-  --fg-mute: 124, 124, 128;
-  --accent: 99, 173, 255;
-  --accent2: 167, 139, 250;
-  --good: 48, 209, 88;
-  --warn: 255, 159, 10;
-  --danger: 255, 69, 58;
-  --hairline: rgba(255, 255, 255, 0.07);
-  --hairline-strong: rgba(255, 255, 255, 0.12);
-  --card: rgba(255, 255, 255, 0.035);
-  --card-hover: rgba(255, 255, 255, 0.06);
+  /* Higher-contrast palette. Background pulled darker, foregrounds pushed
+     brighter, accents made more saturated to match the menubar reference
+     screenshot. WCAG AA contrast against `--bg-base` for body text. */
+  --bg-base: 10, 12, 18;
+  --fg: 252, 252, 255;
+  --fg-dim: 200, 202, 210;
+  --fg-mute: 148, 150, 160;
+  --accent: 80, 192, 255;
+  --accent2: 184, 132, 255;
+  --good: 60, 230, 120;
+  --warn: 255, 176, 32;
+  --danger: 255, 80, 90;
+  --hairline: rgba(255, 255, 255, 0.10);
+  --hairline-strong: rgba(255, 255, 255, 0.18);
+  --card: rgba(255, 255, 255, 0.06);
+  --card-hover: rgba(255, 255, 255, 0.10);
 }
 
 /* ─────────── shell ─────────── */
@@ -131,20 +134,32 @@ body {
   min-width: 0;
 }
 .title-glyph {
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
   display: grid;
   place-items: center;
-  border-radius: 7px;
-  background: linear-gradient(135deg, #63adff, #a78bfa);
-  color: #0a0c12;
-  box-shadow: 0 2px 10px rgba(99, 173, 255, 0.4);
+  border-radius: 9px;
+  /* The SVG renders its own gradient now; the chip background is a darker
+     glow plate so the bright lightning bolt has something to pop off of. */
+  background:
+    radial-gradient(120% 120% at 30% 20%, rgba(99, 173, 255, 0.35), transparent 60%),
+    linear-gradient(135deg, rgba(99, 173, 255, 0.18), rgba(167, 139, 250, 0.18));
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow:
+    0 0 0 1px rgba(99, 173, 255, 0.18),
+    0 4px 16px rgba(99, 173, 255, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
 .title {
-  font-size: 13px;
-  font-weight: 650;
-  letter-spacing: -0.005em;
-  color: rgba(var(--fg), 0.95);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  /* Brand wordmark gets its own gradient text fill — picks up the same
+     palette as the glyph and matches the menubar reference's vibe. */
+  background: linear-gradient(135deg, #ffffff 0%, #e6ecff 60%, #c9b8ff 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 .live-pill {
   display: inline-flex;

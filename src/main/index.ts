@@ -5,6 +5,7 @@ import { Aggregator } from './aggregation/aggregator'
 import { AlertRepository } from './alerts/alert-repository'
 import { AlertNotifier } from './alerts/notifier'
 import { AlertSampler } from './alerts/sampler'
+import { getAlertTrayIcon } from './tray-icons'
 import { AuthRepository } from './auth/auth-repository'
 import { AuthService } from './auth/auth-service'
 import { KeychainStore } from './auth/keychain-store'
@@ -39,6 +40,8 @@ let pool: Pool | null = null
 let events: EventRepository | null = null
 let providers: ProviderRegistry | null = null
 let aggregator: Aggregator | null = null
+let alerts: AlertRepository | null = null
+let baseTrayIcon: Electron.NativeImage | null = null
 
 function getIconPath(): string {
   return path.join(
@@ -129,17 +132,50 @@ function toggleDropdown(): void {
   dropdownWin.focus()
 }
 
-async function updateTrayTitle(): Promise<void> {
+async function updateTrayPresentation(): Promise<void> {
   if (tray === null || aggregator === null) return
   const snap = await aggregator.snapshot()
   const usd = Number(snap.today.costMicroUsd) / 1_000_000
-  const formatted = `$${usd.toFixed(2)}`
+  const cost = `$${usd.toFixed(2)}`
+
+  // Live count of "actionable" alerts (open or acked-but-unresolved). Snoozed
+  // and resolved alerts don't pollute the tray. Falls back to 0 when the
+  // repo isn't ready yet — first refresh runs before app boot completes.
+  let openCount = 0
+  if (alerts !== null) {
+    try {
+      const summary = await alerts.summary()
+      openCount = summary.open + summary.acked
+    } catch {
+      // ignore — keep tray sane if the DB hiccups
+    }
+  }
+  const hasAlerts = openCount > 0
+
+  // Icon swap: warning-triangle template when alerts pending, default chart
+  // glyph otherwise. Both are template images so macOS tints them with the
+  // system foreground color.
+  if (hasAlerts) {
+    tray.setImage(getAlertTrayIcon())
+  } else if (baseTrayIcon !== null) {
+    tray.setImage(baseTrayIcon)
+  }
+
+  // Title text: prepend "⚠ N · " when alerts pending so the count rides
+  // alongside the icon in the menubar.
+  const title = hasAlerts ? `⚠ ${openCount} · ${cost}` : cost
   if (process.platform === 'darwin') {
-    tray.setTitle(formatted)
+    tray.setTitle(title)
   } else {
-    tray.setToolTip(`llm-cost-monitor — ${formatted} today`)
+    const tip = hasAlerts
+      ? `devbar — ${openCount} alert${openCount > 1 ? 's' : ''} · ${cost} today`
+      : `devbar — ${cost} today`
+    tray.setToolTip(tip)
   }
 }
+
+// Backwards-compatible alias used by older call sites.
+const updateTrayTitle = updateTrayPresentation
 
 void app.whenReady().then(async () => {
   if (process.platform === 'darwin') {
@@ -188,10 +224,16 @@ void app.whenReady().then(async () => {
   const auth = new AuthService({ repo: authRepo, keychain })
 
   const alertRepo = new AlertRepository(pool)
+  alerts = alertRepo
   const notifier = new AlertNotifier(settings)
   const sampler = new AlertSampler(alertRepo, aggregator, settings, {
     onRaise: (raises) => notifier.fire(raises),
-    onAnyChange: () => broadcastAlertsUpdated(),
+    onAnyChange: () => {
+      broadcastAlertsUpdated()
+      // Re-paint the tray on every alert mutation so the count stays live
+      // without requiring the user to open the dropdown.
+      void updateTrayPresentation()
+    },
   })
 
   // Cross-node sync. Queue is initialised even when sync is disabled so the
@@ -251,13 +293,13 @@ void app.whenReady().then(async () => {
   })
 
   const iconPath = getIconPath()
-  const icon = nativeImage.createFromPath(iconPath)
-  if (process.platform === 'darwin') icon.setTemplateImage(true)
-  tray = new Tray(icon)
+  baseTrayIcon = nativeImage.createFromPath(iconPath)
+  if (process.platform === 'darwin') baseTrayIcon.setTemplateImage(true)
+  tray = new Tray(baseTrayIcon)
   if (process.platform === 'darwin') {
     tray.setTitle('$0.00')
   } else {
-    tray.setToolTip('llm-cost-monitor')
+    tray.setToolTip('devbar')
   }
 
   dropdownWin = createDropdownWindow()

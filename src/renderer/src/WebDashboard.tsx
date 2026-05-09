@@ -142,7 +142,7 @@ export function WebDashboard(): JSX.Element {
               </svg>
             </span>
             <div className="web-brand-text">
-              <span className="web-brand-name">llm-cost-monitor</span>
+              <span className="web-brand-name">devbar</span>
               <span className="web-brand-sub">on-device LLM usage tracker</span>
             </div>
           </div>

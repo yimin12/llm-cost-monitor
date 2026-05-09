@@ -105,7 +105,7 @@ export function SettingsTab({
           <h3>About</h3>
         </div>
         <p className="about-line">
-          <strong>llm-cost-monitor</strong> · tracks LLM token usage + cost
+          <strong>devbar</strong> · tracks LLM token usage + cost
           across providers. <strong>On-device only by default</strong> — team
           sync is opt-in and uploads only what your privacy level allows.
         </p>

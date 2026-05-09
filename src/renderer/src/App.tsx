@@ -257,12 +257,26 @@ export function App(): JSX.Element {
       <header className="dropdown-header">
         <div className="title-block">
           <span className="title-glyph" aria-hidden>
-            <svg viewBox="0 0 24 24" width="14" height="14">
-              <path d="M3 17l5-5 4 4 8-8" fill="none" stroke="currentColor" strokeWidth="2"
-                    strokeLinecap="round" strokeLinejoin="round" />
+            {/* Layered glyph: gradient diamond + lightning bolt + sparkle. */}
+            <svg viewBox="0 0 24 24" width="16" height="16">
+              <defs>
+                <linearGradient id="glyph-grad" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" stopColor="#63adff" />
+                  <stop offset="0.55" stopColor="#a78bfa" />
+                  <stop offset="1" stopColor="#ff7ac6" />
+                </linearGradient>
+              </defs>
+              <path
+                d="M13 2 L4 13 h6 l-2 9 L20 11 h-6 l2 -9 Z"
+                fill="url(#glyph-grad)"
+                stroke="rgba(255,255,255,0.9)"
+                strokeWidth="0.6"
+                strokeLinejoin="round"
+              />
+              <circle cx="19" cy="4.5" r="1.1" fill="#ffffff" opacity="0.95" />
             </svg>
           </span>
-          <span className="title">llm-cost-monitor</span>
+          <span className="title">devbar</span>
           <span className="live-pill" title={`updated ${timeAgo(agg.generatedAt)} ago`}>
             <span className="live-dot" />
             <span>live · {timeAgo(agg.generatedAt)} ago</span>
@@ -282,7 +296,7 @@ export function App(): JSX.Element {
           <button
             type="button"
             className="quit-btn"
-            title="Quit llm-cost-monitor"
+            title="Quit devbar"
             aria-label="Quit"
             onClick={() => void window.api.appQuit()}
           >
