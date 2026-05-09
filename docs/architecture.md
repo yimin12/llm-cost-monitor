@@ -294,6 +294,14 @@ Users add to `~/.claude/settings.json`:
 
 ---
 
+## D13a. Future cloud-sync extension point (added 2026-05-08, no impl)
+
+`src/shared/remote-probe.ts` defines a `RemoteUsageProbe` interface so a future cloud-sync feature (Options B/C in [`docs/auth-plan.md`](./auth-plan.md) §2) can plug into the existing provider/aggregator pipeline without churn. Today it ships only a `noopRemoteProbe` — always unavailable, always throws on fetch. The provider registry has no wiring yet; this is purely the seam.
+
+When (if) cloud sync ships, the `UsageSnapshot` shape returned by remote and local probes is identical, so `Aggregator` and the renderer don't need to know which side produced a row.
+
+---
+
 ## D14. License + privacy (revised 2026-05-08 for Sign in with Google)
 
 - **License:** MIT.
