@@ -1,0 +1,30 @@
+# Dev-only Postgres for llm-cost-monitor.
+#
+# Bound to 127.0.0.1 only — no network exposure. Password is dev-only and
+# meaningless because the bind is loopback. Data lives in a named Docker
+# volume `lcm_pgdata` that survives `docker compose down`; only `db:reset`
+# (or `docker volume rm lcm_pgdata`) destroys it.
+#
+# Shipped builds do NOT use this — they keep SQLite. See docs/auth-plan.md §2.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: llm-cost-monitor-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: llm_cost_monitor
+      POSTGRES_USER: lcm
+      POSTGRES_PASSWORD: lcm_dev
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - lcm_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lcm -d llm_cost_monitor"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  lcm_pgdata:

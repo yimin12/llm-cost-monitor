@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import type { UsageEvent } from '@shared/usage-event'
 import { Aggregator, startOfDayMs } from '../aggregation/aggregator'
@@ -10,8 +10,9 @@ import { parseClaudeFile } from '../parsers/claude-code'
 import { parseCodexFile } from '../parsers/codex'
 import { parseGeminiFile } from '../parsers/gemini'
 import { PricingTable } from '../pricing/pricing-table'
-import { openDatabase } from '../storage/db'
+import type { Pool } from '../storage/connect'
 import { EventRepository } from '../storage/event-repository'
+import { createTestDatabase, dropTestDatabase } from '../storage/__tests__/test-helpers'
 
 const PRICING = PricingTable.fromBuffer(
   Buffer.from(
@@ -64,7 +65,24 @@ function localEvent(timestamp: number): UsageEvent {
   return { ...partial, computedCostMicroUsd: PRICING.cost(partial) }
 }
 
-describe('usage monitoring workflow', () => {
+describe('usage monitoring workflow (Postgres)', () => {
+  let pool: Pool
+  let dbName: string
+
+  beforeAll(async () => {
+    const ctx = await createTestDatabase()
+    pool = ctx.pool
+    dbName = ctx.dbName
+  }, 30_000)
+
+  afterAll(async () => {
+    await dropTestDatabase(pool, dbName)
+  })
+
+  beforeEach(async () => {
+    await pool.query('TRUNCATE TABLE events')
+  })
+
   it('parses Claude, Codex, Gemini, and local token usage into product aggregates', async () => {
     const now = new Date('2026-05-05T12:00:00.000Z')
     const timestamp = now.getTime()
@@ -144,12 +162,11 @@ describe('usage monitoring workflow', () => {
       localEvent(timestamp),
     ]
 
-    const db = openDatabase(':memory:')
-    const repo = new EventRepository(db)
-    repo.upsertMany(events)
+    const repo = new EventRepository(pool)
+    await repo.upsertMany(events)
 
-    const agg = new Aggregator(db)
-    const snap = agg.snapshot(now)
+    const agg = new Aggregator(pool)
+    const snap = await agg.snapshot(now)
     const expectedCost = events.reduce((sum, e) => sum + e.computedCostMicroUsd, 0n)
 
     expect(events.map((e) => e.provider).sort()).toEqual(['anthropic', 'google', 'local', 'openai'])
@@ -164,6 +181,7 @@ describe('usage monitoring workflow', () => {
     expect(localRow?.costMicroUsd).toBe(0n)
     expect(localRow?.eventCount).toBe(1)
     expect(snap.dailyCostMicroUsd.at(-1)).toBe(expectedCost)
-    expect(repo.between(startOfDayMs(now), startOfDayMs(now) + 86_400_000)).toHaveLength(4)
+    const window = await repo.between(startOfDayMs(now), startOfDayMs(now) + 86_400_000)
+    expect(window).toHaveLength(4)
   })
 })

@@ -1,4 +1,5 @@
 import type { AggregateSnapshot } from './aggregates'
+import type { AuthState } from './auth'
 
 export const IPC = {
   PING: 'ping',
@@ -7,10 +8,15 @@ export const IPC = {
   AGGREGATES: 'aggregates:snapshot',
   PROVIDERS_LIST: 'providers:list',
   PROVIDERS_REFRESH: 'providers:refresh',
+  AUTH_CURRENT: 'auth:current',
+  AUTH_SIGNIN: 'auth:signin',
+  AUTH_SIGNOUT: 'auth:signout',
+  APP_QUIT: 'app:quit',
 } as const
 
 export const EVENT = {
   USAGE_UPDATED: 'usage:updated',
+  AUTH_STATE_CHANGED: 'auth:state-changed',
 } as const
 
 export interface PricingInfo {
@@ -37,4 +43,4 @@ export interface ProviderRefreshResult {
   error: string | null
 }
 
-export type { AggregateSnapshot }
+export type { AggregateSnapshot, AuthState }

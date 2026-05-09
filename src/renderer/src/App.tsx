@@ -2,10 +2,14 @@ import { useCallback, useEffect, useState } from 'react'
 
 import type {
   AggregateSnapshot,
+  AuthState,
   PricingInfo,
   ProviderListEntry,
   StorageInfo,
 } from '@shared/ipc-channels'
+
+import { AuthHeader } from './components/AuthHeader'
+import { PrivacyBanner } from './components/PrivacyBanner'
 
 declare global {
   interface Window {
@@ -17,6 +21,11 @@ declare global {
       providersList: () => Promise<ProviderListEntry[]>
       providersRefresh: () => Promise<{ provider: string; error: string | null }[]>
       onUsageUpdated: (cb: () => void) => () => void
+      authCurrent: () => Promise<AuthState>
+      authSignIn: () => Promise<AuthState>
+      authSignOut: () => Promise<AuthState>
+      onAuthStateChanged: (cb: (state: AuthState) => void) => () => void
+      appQuit: () => Promise<void>
     }
   }
 }
@@ -101,7 +110,19 @@ export function App(): JSX.Element {
         >
           {refreshing ? '↻ refreshing…' : '↻ refresh'}
         </button>
+        <button
+          type="button"
+          className="quit-btn"
+          title="Quit llm-cost-monitor"
+          aria-label="Quit"
+          onClick={() => void window.api.appQuit()}
+        >
+          ⏻
+        </button>
       </header>
+
+      <AuthHeader />
+
 
       <section className="totals">
         <div className="total-card">
@@ -237,12 +258,7 @@ export function App(): JSX.Element {
         </ul>
       </section>
 
-      <section className="privacy">
-        <p className="privacy-line">
-          <strong>On-device only.</strong> Session logs scanned locally; no
-          telemetry, no cloud sync.
-        </p>
-      </section>
+      <PrivacyBanner />
     </div>
   )
 }

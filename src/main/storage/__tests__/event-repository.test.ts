@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import type { UsageEvent } from '@shared/usage-event'
-import { openDatabase, type DatabaseHandle } from '../db'
+import type { Pool } from '../connect'
 import { EventRepository } from '../event-repository'
+import { createTestDatabase, dropTestDatabase } from './test-helpers'
 
 function makeEvent({ id, ...partial }: Partial<UsageEvent> & Pick<UsageEvent, 'id'>): UsageEvent {
   return {
@@ -31,26 +32,40 @@ function makeEvent({ id, ...partial }: Partial<UsageEvent> & Pick<UsageEvent, 'i
   }
 }
 
-describe('EventRepository', () => {
-  let db: DatabaseHandle
+describe('EventRepository (Postgres)', () => {
+  let pool: Pool
+  let dbName: string
   let repo: EventRepository
 
-  beforeEach(() => {
-    db = openDatabase(':memory:')
-    repo = new EventRepository(db)
+  beforeAll(async () => {
+    const ctx = await createTestDatabase()
+    pool = ctx.pool
+    dbName = ctx.dbName
+  }, 30_000)
+
+  afterAll(async () => {
+    await dropTestDatabase(pool, dbName)
   })
 
-  it('starts empty and reports schema_version 1', () => {
-    expect(repo.count()).toBe(0)
-    const v = db.prepare<[], { version: bigint }>('SELECT version FROM schema_version').get()
-    expect(Number(v?.version)).toBe(1)
+  beforeEach(async () => {
+    await pool.query('TRUNCATE TABLE events')
+    repo = new EventRepository(pool)
   })
 
-  it('round-trips an event including bigint cost', () => {
+  it('starts empty and reports current schema version', async () => {
+    expect(await repo.count()).toBe(0)
+    const r = await pool.query<{ version: number }>(
+      'SELECT MAX(version) AS version FROM schema_version',
+    )
+    // Current latest migration; bump as new ones land.
+    expect(r.rows[0]?.version).toBeGreaterThanOrEqual(2)
+  })
+
+  it('round-trips an event including bigint cost', async () => {
     const e = makeEvent({ id: 'evt-1' })
-    repo.upsert(e)
+    await repo.upsert(e)
 
-    const found = repo.findById('evt-1')
+    const found = await repo.findById('evt-1')
     expect(found).not.toBeNull()
     if (found === null) return
     expect(found).toEqual(e)
@@ -58,58 +73,58 @@ describe('EventRepository', () => {
     expect(found.computedCostMicroUsd).toBe(10500n)
   })
 
-  it('upsert is idempotent on conflicting id (last write wins)', () => {
-    repo.upsert(makeEvent({ id: 'evt-2', outputTokens: 100, computedCostMicroUsd: 1n }))
-    repo.upsert(makeEvent({ id: 'evt-2', outputTokens: 200, computedCostMicroUsd: 2n }))
+  it('upsert is idempotent on conflicting id (last write wins)', async () => {
+    await repo.upsert(makeEvent({ id: 'evt-2', outputTokens: 100, computedCostMicroUsd: 1n }))
+    await repo.upsert(makeEvent({ id: 'evt-2', outputTokens: 200, computedCostMicroUsd: 2n }))
 
-    expect(repo.count()).toBe(1)
-    const found = repo.findById('evt-2')
+    expect(await repo.count()).toBe(1)
+    const found = await repo.findById('evt-2')
     expect(found?.outputTokens).toBe(200)
     expect(found?.computedCostMicroUsd).toBe(2n)
   })
 
-  it('upsertMany applies a batch in one transaction', () => {
+  it('upsertMany applies a batch in one transaction', async () => {
     const batch = [
       makeEvent({ id: 'b-1', timestamp: 1000 }),
       makeEvent({ id: 'b-2', timestamp: 2000 }),
       makeEvent({ id: 'b-3', timestamp: 3000 }),
     ]
-    repo.upsertMany(batch)
-    expect(repo.count()).toBe(3)
+    await repo.upsertMany(batch)
+    expect(await repo.count()).toBe(3)
   })
 
-  it('between returns events in ascending timestamp order, half-open range', () => {
-    repo.upsertMany([
+  it('between returns events in ascending timestamp order, half-open range', async () => {
+    await repo.upsertMany([
       makeEvent({ id: 'a', timestamp: 100, computedCostMicroUsd: 1n }),
       makeEvent({ id: 'b', timestamp: 200, computedCostMicroUsd: 2n }),
       makeEvent({ id: 'c', timestamp: 300, computedCostMicroUsd: 4n }),
       makeEvent({ id: 'd', timestamp: 400, computedCostMicroUsd: 8n }),
     ])
-    const slice = repo.between(150, 350)
+    const slice = await repo.between(150, 350)
     expect(slice.map((e) => e.id)).toEqual(['b', 'c'])
   })
 
-  it('costMicroUsdBetween sums bigint costs over the half-open window', () => {
-    repo.upsertMany([
+  it('costMicroUsdBetween sums bigint costs over the half-open window', async () => {
+    await repo.upsertMany([
       makeEvent({ id: 'a', timestamp: 100, computedCostMicroUsd: 1n }),
       makeEvent({ id: 'b', timestamp: 200, computedCostMicroUsd: 2n }),
       makeEvent({ id: 'c', timestamp: 300, computedCostMicroUsd: 4n }),
       makeEvent({ id: 'd', timestamp: 400, computedCostMicroUsd: 8n }),
     ])
-    expect(repo.costMicroUsdBetween(150, 350)).toBe(6n)
-    expect(repo.costMicroUsdBetween(0, 1000)).toBe(15n)
-    expect(repo.costMicroUsdBetween(500, 600)).toBe(0n)
+    expect(await repo.costMicroUsdBetween(150, 350)).toBe(6n)
+    expect(await repo.costMicroUsdBetween(0, 1000)).toBe(15n)
+    expect(await repo.costMicroUsdBetween(500, 600)).toBe(0n)
   })
 
-  it('handles costs above 2^53 without precision loss', () => {
+  it('handles costs above 2^53 without precision loss', async () => {
     const huge = (1n << 60n) + 7n
-    repo.upsert(makeEvent({ id: 'big', computedCostMicroUsd: huge }))
-    const found = repo.findById('big')
+    await repo.upsert(makeEvent({ id: 'big', computedCostMicroUsd: huge }))
+    const found = await repo.findById('big')
     expect(found?.computedCostMicroUsd).toBe(huge)
   })
 
-  it('null-typed columns survive the round-trip', () => {
-    repo.upsert(
+  it('null-typed columns survive the round-trip', async () => {
+    await repo.upsert(
       makeEvent({
         id: 'nulls',
         providerRawTag: null,
@@ -122,7 +137,7 @@ describe('EventRepository', () => {
         latencyMs: null,
       }),
     )
-    const found = repo.findById('nulls')
+    const found = await repo.findById('nulls')
     expect(found?.providerRawTag).toBeNull()
     expect(found?.project).toBeNull()
     expect(found?.projectRawSlug).toBeNull()

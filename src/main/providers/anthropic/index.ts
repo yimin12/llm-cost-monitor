@@ -54,7 +54,7 @@ export class AnthropicProvider implements AIProvider {
       pricing: this.deps.pricing,
       fileCache: this.deps.fileCache,
     })
-    if (events.length > 0) this.deps.events.upsertMany(events)
+    if (events.length > 0) await this.deps.events.upsertMany(events)
     const snap = emptySnapshot(this.id)
     this.latest = snap
     return snap

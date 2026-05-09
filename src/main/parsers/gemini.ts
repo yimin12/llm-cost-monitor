@@ -84,7 +84,7 @@ export async function parseGeminiFile(
       const s = await stat(path)
       fileSize = s.size
       fileMtime = Math.floor(s.mtimeMs)
-      const cached = fileCache.get(path)
+      const cached = await fileCache.get(path)
       if (cached !== null && cached.mtime === fileMtime && cached.lastOffset === fileSize) {
         return []
       }
@@ -159,7 +159,7 @@ export async function parseGeminiFile(
   }
 
   if (fileCache !== undefined && fileSize > 0) {
-    fileCache.upsert({
+    await fileCache.upsert({
       path,
       mtime: fileMtime,
       lastParsedAt: Date.now(),
