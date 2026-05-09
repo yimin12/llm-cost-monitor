@@ -39,6 +39,13 @@ export interface AppSettings {
   // Cross-node sync configuration. Disabled by default; user opts in via UI.
   // See plan.md Phase 5 + src/shared/sync.ts.
   teamSync: TeamSyncSettings
+  // Per-provider plan label override. Keyed by provider id, value is the
+  // tier label ("Pro", "Plus", "Max", whatever the user wants the chip to
+  // read). Used when the auth detector can't surface the tier locally —
+  // notably Gemini, where Google's OIDC id_token doesn't include
+  // subscription state. Empty string / missing key = fall through to
+  // the detected plan.
+  planOverrides: Record<string, string>
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -67,4 +74,5 @@ export const DEFAULT_SETTINGS: AppSettings = {
     notifications: true,
   },
   teamSync: DEFAULT_TEAM_SYNC,
+  planOverrides: {},
 }

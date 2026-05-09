@@ -44,12 +44,32 @@ body {
 }
 
 /* ─────────── shell ─────────── */
+/* SCROLL PERFORMANCE NOTE
+ * The previous version of this rule had `backdrop-filter: blur(28px)
+ * saturate(160%)` directly on the scroll container. backdrop-filter forces
+ * Chromium to recomposite every frame as the contents scroll, which
+ * tanks scroll smoothness in Electron specifically (see
+ * github.com/electron/electron/issues/12906 + #2332).
+ *
+ * Mitigations applied here:
+ *   1. backdrop-filter removed from `.dropdown`. The aurora layer
+ *      already provides depth; the panel itself is now near-opaque so
+ *      we don't need the blurred-translucency trick.
+ *   2. The scroll container is promoted to its own GPU layer via
+ *      `transform: translateZ(0)` + `will-change: scroll-position`.
+ *   3. `overscroll-behavior: contain` stops scroll chains from bubbling
+ *      up to the host BrowserWindow and triggering rubber-band repaints.
+ *   4. `contain: layout paint` is applied to settings-card / provider-
+ *      card / loaded-tab containers below so each row's repaint stays
+ *      bounded to its own subtree instead of forcing a panel-wide
+ *      relayout per scroll tick.
+ */
 .dropdown {
   position: relative;
   isolation: isolate;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0)) ,
-    rgba(var(--bg-base), 0.94);
+    rgba(var(--bg-base), 0.985);
   border: 1px solid var(--hairline-strong);
   border-radius: 16px;
   color: rgb(var(--fg));
@@ -60,9 +80,15 @@ body {
   padding: 12px 14px 10px;
   width: 100%;
   overflow-y: auto;
+  overscroll-behavior: contain;
   font-size: 12px;
-  backdrop-filter: blur(28px) saturate(160%);
-  -webkit-backdrop-filter: blur(28px) saturate(160%);
+  /* Promote to its own compositor layer so scrolling doesn't repaint
+     the menubar's host window. translateZ(0) is the canonical incantation;
+     `will-change: scroll-position` tells Chromium specifically that
+     scrollTop is the property mutating, which lets it skip layout
+     recalc on each frame. */
+  transform: translateZ(0);
+  will-change: scroll-position;
   box-shadow:
     0 16px 48px rgba(0, 0, 0, 0.55),
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
@@ -1192,6 +1218,9 @@ body {
   flex-direction: column;
   gap: 8px;
   transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+  /* Bound the card's layout/paint to its own subtree so scrolling the
+     dropdown doesn't trigger a panel-wide relayout for every card. */
+  contain: layout paint;
 }
 .provider-card:hover {
   background: var(--card-hover);
@@ -1331,6 +1360,8 @@ body {
   flex-direction: column;
   gap: 8px;
   transition: background 200ms ease, border-color 200ms ease;
+  /* Same scroll-isolation trick as `.provider-card`. */
+  contain: layout paint;
 }
 .settings-card:hover {
   background: var(--card-hover);

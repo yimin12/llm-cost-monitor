@@ -345,7 +345,7 @@ export function App(): JSX.Element {
         )}
         {mountedTabs.has('providers') && (
           <div hidden={activeTab !== 'providers'}>
-            <ProvidersTab agg={agg} providers={providers} dashboardUrl={dashboardUrl} />
+            <ProvidersTab agg={agg} providers={providers} dashboardUrl={dashboardUrl} settings={settings} />
           </div>
         )}
         {mountedTabs.has('sessions') && (
