@@ -1,3 +1,4 @@
+import type { PlanInfo } from './plan-info'
 import type { UsageSnapshot } from './snapshot'
 
 // User-facing provider — what the menubar UI binds to via IPC.
@@ -21,6 +22,10 @@ export interface AIProvider {
   snapshot(): UsageSnapshot | null
   isAvailable(): Promise<boolean>
   refresh(): Promise<UsageSnapshot>
+
+  // Whether the user is on a subscription (Pro/Max/Plus/Team/...) or paying
+  // via API key, and which plan if known. Reads local auth files; no network.
+  getPlanInfo(): Promise<PlanInfo>
 }
 
 // Internal data fetcher. Providers may compose multiple probes —

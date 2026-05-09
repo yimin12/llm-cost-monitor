@@ -1,3 +1,4 @@
+import type { PlanInfo } from '@shared/plan-info'
 import type { AIProvider } from '@shared/provider'
 import { emptySnapshot, type UsageSnapshot } from '@shared/snapshot'
 
@@ -5,6 +6,7 @@ import { parseClaude, resolveClaudeHome } from '../../parsers/claude-code'
 import type { PricingTable } from '../../pricing/pricing-table'
 import type { EventRepository } from '../../storage/event-repository'
 import type { FileCache } from '../../storage/file-cache'
+import { detectAnthropicPlan } from './plan'
 
 export interface AnthropicProviderDeps {
   pricing: PricingTable
@@ -47,6 +49,10 @@ export class AnthropicProvider implements AIProvider {
       this.inflight = null
     })
     return this.inflight
+  }
+
+  getPlanInfo(): Promise<PlanInfo> {
+    return detectAnthropicPlan()
   }
 
   private async refreshImpl(): Promise<UsageSnapshot> {

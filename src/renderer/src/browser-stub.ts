@@ -108,11 +108,16 @@ const fakeSnapshot: AggregateSnapshot = {
 }
 
 const fakeProviders: ProviderListEntry[] = [
-  { id: 'anthropic', name: 'Claude Code', isEnabled: true, isAvailable: true, cliCommand: 'claude', dashboardUrl: null },
-  { id: 'openai', name: 'Codex CLI', isEnabled: true, isAvailable: true, cliCommand: 'codex', dashboardUrl: null },
-  { id: 'google', name: 'Gemini CLI', isEnabled: true, isAvailable: true, cliCommand: 'gemini', dashboardUrl: null },
-  { id: 'deepseek', name: 'DeepSeek', isEnabled: false, isAvailable: false, cliCommand: null, dashboardUrl: null },
-  { id: 'moonshotai', name: 'Kimi', isEnabled: false, isAvailable: false, cliCommand: null, dashboardUrl: null },
+  { id: 'anthropic', name: 'Claude Code', isEnabled: true, isAvailable: true, cliCommand: 'claude', dashboardUrl: null,
+    plan: { authMode: 'subscription', planName: 'Max', source: 'macOS Keychain', detail: 'demo@example.com' } },
+  { id: 'openai', name: 'Codex CLI', isEnabled: true, isAvailable: true, cliCommand: 'codex', dashboardUrl: null,
+    plan: { authMode: 'subscription', planName: 'Plus', source: '~/.codex/auth.json', detail: 'demo@example.com' } },
+  { id: 'google', name: 'Gemini CLI', isEnabled: true, isAvailable: true, cliCommand: 'gemini', dashboardUrl: null,
+    plan: { authMode: 'subscription', planName: 'Google Account', source: '~/.gemini/oauth_creds.json', detail: 'demo@example.com' } },
+  { id: 'deepseek', name: 'DeepSeek', isEnabled: false, isAvailable: false, cliCommand: null, dashboardUrl: null,
+    plan: { authMode: 'apiKey', planName: 'API key', source: 'DEEPSEEK_API_KEY env', detail: null } },
+  { id: 'moonshotai', name: 'Kimi', isEnabled: false, isAvailable: false, cliCommand: null, dashboardUrl: null,
+    plan: { authMode: 'none', planName: null, source: null, detail: null } },
 ]
 
 const fakePricing: PricingInfo = { snapshotVersion: '246413ab150e (preview)', modelCount: 2250 }

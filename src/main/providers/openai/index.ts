@@ -1,3 +1,4 @@
+import type { PlanInfo } from '@shared/plan-info'
 import type { AIProvider } from '@shared/provider'
 import { emptySnapshot, type UsageSnapshot } from '@shared/snapshot'
 
@@ -5,6 +6,7 @@ import { parseCodex, resolveCodexHome } from '../../parsers/codex'
 import type { PricingTable } from '../../pricing/pricing-table'
 import type { EventRepository } from '../../storage/event-repository'
 import type { FileCache } from '../../storage/file-cache'
+import { detectOpenAIPlan } from './plan'
 
 export interface OpenAIProviderDeps {
   pricing: PricingTable
@@ -45,6 +47,10 @@ export class OpenAIProvider implements AIProvider {
       this.inflight = null
     })
     return this.inflight
+  }
+
+  getPlanInfo(): Promise<PlanInfo> {
+    return detectOpenAIPlan()
   }
 
   private async refreshImpl(): Promise<UsageSnapshot> {
