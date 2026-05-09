@@ -11,6 +11,10 @@ Open-source **macOS + Linux** tray app that tracks LLM token usage and cost acro
 - Costs computed via 2,250-model LiteLLM pricing snapshot, integer micro-USD throughout.
 - **Dev branch (`feat/auth-gmail`):** event store is **Postgres 17 in Docker** (`127.0.0.1:5433`). Schema v1, BIGINT cost as JS bigint via `pg.types.setTypeParser`. `main` still on better-sqlite3.
 - **Refresh** on app start + every 5 minutes + manual button.
+- **Team sync (opt-in, dev branch `feat/team-sync`)**: a Node/Postgres
+  server in `server/` collects redacted projections of usage events
+  for cross-node and team rollups. See [`docs/team-sync.md`](./docs/team-sync.md).
+  Strictly off by default; existing installs see no behavior change.
 
 See [`plan.md`](./plan.md) for the project plan and [`docs/architecture.md`](./docs/architecture.md) for the decision record.
 
