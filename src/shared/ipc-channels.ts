@@ -11,6 +11,7 @@ export const IPC = {
   AUTH_CURRENT: 'auth:current',
   AUTH_SIGNIN: 'auth:signin',
   AUTH_SIGNOUT: 'auth:signout',
+  APP_QUIT: 'app:quit',
 } as const
 
 export const EVENT = {

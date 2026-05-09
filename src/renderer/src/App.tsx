@@ -25,6 +25,7 @@ declare global {
       authSignIn: () => Promise<AuthState>
       authSignOut: () => Promise<AuthState>
       onAuthStateChanged: (cb: (state: AuthState) => void) => () => void
+      appQuit: () => Promise<void>
     }
   }
 }
@@ -108,6 +109,15 @@ export function App(): JSX.Element {
           onClick={() => void handleRefresh()}
         >
           {refreshing ? '↻ refreshing…' : '↻ refresh'}
+        </button>
+        <button
+          type="button"
+          className="quit-btn"
+          title="Quit llm-cost-monitor"
+          aria-label="Quit"
+          onClick={() => void window.api.appQuit()}
+        >
+          ✕
         </button>
       </header>
 

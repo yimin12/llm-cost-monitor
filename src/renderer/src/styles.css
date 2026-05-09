@@ -69,6 +69,28 @@ body {
   cursor: progress;
 }
 
+.quit-btn {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: rgba(245, 245, 247, 0.55);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  height: 22px;
+  width: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 6px;
+  transition: background 0.15s, color 0.15s;
+}
+.quit-btn:hover {
+  background: rgba(255, 69, 58, 0.18);
+  color: #ff453a;
+  border-color: rgba(255, 69, 58, 0.35);
+}
+
 .totals {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

@@ -1,4 +1,4 @@
-import { BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain } from 'electron'
 
 import {
   EVENT,
@@ -57,6 +57,12 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     for (const win of BrowserWindow.getAllWindows()) {
       win.webContents.send(EVENT.AUTH_STATE_CHANGED, state)
     }
+  })
+
+  // Tray apps don't have a Dock icon or a menu bar entry, so the only way for
+  // a user to quit was Cmd-Q from a focused window. Expose an explicit action.
+  ipcMain.handle(IPC.APP_QUIT, () => {
+    app.quit()
   })
 }
 
