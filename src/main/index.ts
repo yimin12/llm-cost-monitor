@@ -161,9 +161,10 @@ async function updateTrayPresentation(): Promise<void> {
     tray.setImage(baseTrayIcon)
   }
 
-  // Title text: prepend "⚠ N · " when alerts pending so the count rides
-  // alongside the icon in the menubar.
-  const title = hasAlerts ? `⚠ ${openCount} · ${cost}` : cost
+  // Title text: prepend just the count when alerts pending. The swapped
+  // tray icon already conveys the "warning" semantics — repeating the
+  // ⚠ glyph in the title doubles up visually.
+  const title = hasAlerts ? `${openCount} · ${cost}` : cost
   if (process.platform === 'darwin') {
     tray.setTitle(title)
   } else {
