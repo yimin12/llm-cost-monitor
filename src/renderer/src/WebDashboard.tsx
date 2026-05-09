@@ -271,12 +271,12 @@ export function WebDashboard(): JSX.Element {
           </article>
         </section>
 
-        {/* Forecast bar */}
+        {/* Forecast — total + per-provider breakdown */}
         {agg.forecast !== null && (
           <section className="web-card">
             <header className="web-card-head">
               <div>
-                <h2>Month-to-date</h2>
+                <h2>Month-end forecast</h2>
                 <p>
                   <strong>{microToUsd(agg.forecast.spentMicroUsd)}</strong> spent of an estimated
                   {' '}
@@ -289,6 +289,43 @@ export function WebDashboard(): JSX.Element {
             <div className="web-forecast-bar">
               <div className="web-forecast-bar-fill" style={{ width: `${forecastPct}%` }} />
             </div>
+
+            {Object.keys(agg.forecastByProvider).length > 0 && (
+              <div className="web-forecast-providers">
+                <div className="web-forecast-providers-head">
+                  <span>By provider</span>
+                  <span>spent / est · share of total</span>
+                </div>
+                <ul>
+                  {Object.entries(agg.forecastByProvider)
+                    .sort((a, b) =>
+                      Number(b[1].estimateMicroUsd) - Number(a[1].estimateMicroUsd),
+                    )
+                    .map(([provider, f]) => {
+                      const color = providerColor(provider)
+                      const est = Number(f.estimateMicroUsd)
+                      const totalEst = Math.max(1, Number(agg.forecast?.estimateMicroUsd ?? 1n))
+                      const sharePct = (est / totalEst) * 100
+                      const spentPct = est > 0 ? (Number(f.spentMicroUsd) / est) * 100 : 0
+                      return (
+                        <li key={provider}>
+                          <span className="web-fp-chip" style={{ background: color }} />
+                          <span className="web-fp-name">{providerName(provider)}</span>
+                          <span className="web-fp-bar" aria-hidden>
+                            <span className="web-fp-bar-fill" style={{ width: `${spentPct}%`, background: color }} />
+                          </span>
+                          <span className="web-fp-num">
+                            <strong>{microToUsd(f.spentMicroUsd)}</strong>
+                            <span className="web-fp-sep"> / </span>
+                            <span className="web-fp-est">~{microToUsd(f.estimateMicroUsd)}</span>
+                          </span>
+                          <span className="web-fp-share">{sharePct.toFixed(0)}%</span>
+                        </li>
+                      )
+                    })}
+                </ul>
+              </div>
+            )}
           </section>
         )}
 

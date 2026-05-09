@@ -65,6 +65,10 @@ export interface AggregateSnapshot {
   topModelsToday: CostByModel[]
   topProjectsToday: CostByProject[]
   forecast: MonthlyForecast | null
+  // Per-provider month-end forecast — same linear projection as `forecast`,
+  // computed independently for each provider that has ≥3 days of activity in
+  // the current month. Providers below the threshold are absent from the map.
+  forecastByProvider: Record<string, MonthlyForecast>
   // Last 14 calendar days of cost in micro-USD, oldest → newest. Today is the
   // last entry; days with no events are 0n. Drives the hero sparkline.
   dailyCostMicroUsd: bigint[]

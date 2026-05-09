@@ -73,6 +73,23 @@ const fakeSnapshot: AggregateSnapshot = {
     estimateMicroUsd: usd(128.16),
     confidenceBandMicroUsd: usd(11.4),
   },
+  forecastByProvider: {
+    anthropic: {
+      monthStartMs: Date.now() - 7 * 24 * 3600_000,
+      daysElapsed: 7, daysInMonth: 31,
+      spentMicroUsd: usd(18.4), estimateMicroUsd: usd(81.5), confidenceBandMicroUsd: usd(7.2),
+    },
+    openai: {
+      monthStartMs: Date.now() - 7 * 24 * 3600_000,
+      daysElapsed: 7, daysInMonth: 31,
+      spentMicroUsd: usd(8.2), estimateMicroUsd: usd(36.3), confidenceBandMicroUsd: usd(3.1),
+    },
+    google: {
+      monthStartMs: Date.now() - 7 * 24 * 3600_000,
+      daysElapsed: 7, daysInMonth: 31,
+      spentMicroUsd: usd(2.34), estimateMicroUsd: usd(10.36), confidenceBandMicroUsd: usd(1.1),
+    },
+  },
   dailyCostMicroUsd: [
     usd(0.8), usd(2.1), usd(3.4), usd(1.2), usd(0.5), usd(2.8), usd(4.7),
     usd(3.2), usd(5.1), usd(2.6), usd(1.9), usd(3.7), usd(6.2), usd(4.27),

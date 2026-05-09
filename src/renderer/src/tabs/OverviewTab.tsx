@@ -152,7 +152,7 @@ export function OverviewTab({ agg, period, onPeriodChange }: {
       {agg.forecast !== null ? (
         <section className="forecast-card">
           <div className="forecast-card-head">
-            <span className="chart-card-title">Month-end forecast</span>
+            <span className="chart-card-title">Month-end forecast · total</span>
             <span className="forecast-pct">{forecastPct.toFixed(0)}%</span>
           </div>
           <div className="forecast-bar" aria-hidden>
@@ -163,6 +163,38 @@ export function OverviewTab({ agg, period, onPeriodChange }: {
             <span className="forecast-mid">day {agg.forecast.daysElapsed} / {agg.forecast.daysInMonth}</span>
             <span>~<strong>{microToUsd(agg.forecast.estimateMicroUsd)}</strong> est.</span>
           </div>
+
+          {Object.keys(agg.forecastByProvider).length > 0 && (
+            <ul className="forecast-by-provider">
+              {Object.entries(agg.forecastByProvider)
+                .sort((a, b) =>
+                  Number(b[1].estimateMicroUsd) - Number(a[1].estimateMicroUsd),
+                )
+                .map(([provider, f]) => {
+                  const color = providerColor(provider)
+                  const est = Number(f.estimateMicroUsd)
+                  const totalEst = Math.max(1, Number(agg.forecast?.estimateMicroUsd ?? 1n))
+                  const sharePct = (est / totalEst) * 100
+                  const spentPct = est > 0 ? (Number(f.spentMicroUsd) / est) * 100 : 0
+                  return (
+                    <li key={provider} className="forecast-prov-row">
+                      <span className="row-chip" style={{ background: color, boxShadow: `0 0 6px ${color}66` }} />
+                      <span className="forecast-prov-name">{providerName(provider)}</span>
+                      <span className="forecast-prov-mini" aria-hidden>
+                        <span
+                          className="forecast-prov-mini-fill"
+                          style={{ width: `${spentPct}%`, background: color }}
+                        />
+                      </span>
+                      <span className="forecast-prov-spent">{microToUsd(f.spentMicroUsd)}</span>
+                      <span className="forecast-prov-sep">/</span>
+                      <span className="forecast-prov-est">~{microToUsd(f.estimateMicroUsd)}</span>
+                      <span className="forecast-prov-share">{sharePct.toFixed(0)}%</span>
+                    </li>
+                  )
+                })}
+            </ul>
+          )}
         </section>
       ) : (
         <section className="forecast-card forecast-empty">

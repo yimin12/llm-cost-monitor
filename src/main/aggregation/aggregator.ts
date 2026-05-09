@@ -278,6 +278,77 @@ export class Aggregator {
     }))
   }
 
+  // Per-day cost rollup grouped by provider. Drives forecastByProvider.
+  // Same day-bucketing convention as perDayCost.
+  private async perDayCostByProvider(
+    startMs: number,
+    endMs: number,
+    originMs: number,
+  ): Promise<Map<string, bigint[]>> {
+    const q = namedQuery(
+      `SELECT provider,
+              FLOOR((timestamp - @origin) / @bucket)::bigint AS day_idx,
+              COALESCE(SUM(computed_cost_micro_usd), 0)::bigint AS cost
+       FROM events
+       WHERE timestamp >= @start AND timestamp < @end
+       GROUP BY provider, day_idx
+       ORDER BY provider, day_idx ASC`,
+      {
+        start: BigInt(startMs),
+        end: BigInt(endMs),
+        bucket: BigInt(DAY_MS),
+        origin: BigInt(originMs),
+      },
+    )
+    const r = await this.pool.query<{ provider: string; day_idx: bigint; cost: bigint }>(
+      q.text,
+      q.values,
+    )
+    const out = new Map<string, bigint[]>()
+    for (const row of r.rows) {
+      const list = out.get(row.provider) ?? []
+      list.push(readBigint(row.cost))
+      out.set(row.provider, list)
+    }
+    return out
+  }
+
+  // Per-provider month-end forecast. Mirrors `forecast` but partitioned by
+  // provider — only providers with ≥3 active days in the month appear.
+  async forecastByProvider(now: Date = new Date()): Promise<Record<string, MonthlyForecast>> {
+    const monthStart = startOfMonthMs(now)
+    const todayStart = startOfDayMs(now)
+    const todayEnd = todayStart + DAY_MS
+    const dim = daysInMonth(now)
+    const daysElapsed = Math.floor((todayEnd - monthStart) / DAY_MS)
+    const byProvider = await this.perDayCostByProvider(monthStart, todayEnd, monthStart)
+
+    const out: Record<string, MonthlyForecast> = {}
+    for (const [provider, perDay] of byProvider) {
+      if (perDay.length < 3) continue
+      let spent = 0n
+      for (const c of perDay) spent += c
+      const estimate =
+        daysElapsed > 0 ? (spent * BigInt(dim)) / BigInt(daysElapsed) : 0n
+      const perDayN = perDay.map((b) => Number(b))
+      const mean = perDayN.reduce((a, b) => a + b, 0) / perDayN.length
+      const variance =
+        perDayN.reduce((acc, x) => acc + (x - mean) ** 2, 0) / perDayN.length
+      const stddev = Math.sqrt(variance)
+      const remainingDays = Math.max(0, dim - daysElapsed)
+      const band = BigInt(Math.round(stddev * Math.sqrt(remainingDays)))
+      out[provider] = {
+        monthStartMs: monthStart,
+        daysElapsed,
+        daysInMonth: dim,
+        spentMicroUsd: spent,
+        estimateMicroUsd: estimate,
+        confidenceBandMicroUsd: band,
+      }
+    }
+    return out
+  }
+
   // Linear month-end forecast with a 1σ confidence band.
   // Returns null if < 3 days of data in the month (under-determined).
   async forecast(now: Date = new Date()): Promise<MonthlyForecast | null> {
@@ -333,6 +404,7 @@ export class Aggregator {
       dailyCostMicroUsd,
       providerLastSeen,
       recentSessions,
+      forecastByProvider,
     ] = await Promise.all([
       this.rangeTotal(todayStart, todayEnd),
       this.rangeTotal(sevenDayStart, todayEnd),
@@ -345,6 +417,7 @@ export class Aggregator {
       this.dailySeries(DAILY_SERIES_DAYS, now),
       this.providerLastSeen(),
       this.recentSessions(RECENT_SESSIONS_LIMIT),
+      this.forecastByProvider(now),
     ])
 
     return {
@@ -357,6 +430,7 @@ export class Aggregator {
       topModelsToday,
       topProjectsToday,
       forecast,
+      forecastByProvider,
       dailyCostMicroUsd,
       providerLastSeen,
       recentSessions,
