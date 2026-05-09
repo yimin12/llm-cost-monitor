@@ -1,0 +1,239 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+
+import type { SyncedDailyV1, SyncedEventV1 } from '../../src/shared/sync'
+
+import type { Pool } from '../db'
+import { TeamService } from '../team-service'
+import { createServerTestDatabase, dropServerTestDatabase } from './test-helpers'
+
+// Use Date.now() so events fall inside the default 30-day overview window.
+const NOW = Date.now()
+
+function evt(over: Partial<SyncedEventV1> = {}): SyncedEventV1 {
+  return {
+    kind: 'event',
+    event_version: 1,
+    sync_event_id: 'sid-1',
+    team_id: 'team-A',
+    user_id: 'user-1',
+    node_id: 'node-1',
+    local_event_id: 'local-1',
+    payload_hash: 'hash-1',
+    privacy_level: 'redacted',
+    captured_at: NOW,
+    synced_at: null,
+    provider: 'anthropic',
+    provider_raw_tag: null,
+    model: 'claude-3-5-sonnet',
+    timestamp: NOW,
+    project: null,
+    project_hash: 'p-hash-A',
+    session_id: null,
+    message_id: null,
+    input_tokens: 10,
+    output_tokens: 5,
+    cache_read_tokens: 0,
+    cache_creation_5m_tokens: 0,
+    cache_creation_1h_tokens: 0,
+    reasoning_tokens: null,
+    tool_call_count: null,
+    latency_ms: null,
+    cost_micro_usd: '1500',
+    pricing_snapshot_version: 'v1',
+    ...over,
+  }
+}
+
+function daily(over: Partial<SyncedDailyV1> = {}): SyncedDailyV1 {
+  return {
+    kind: 'daily',
+    event_version: 1,
+    team_id: 'team-A',
+    user_id: 'user-1',
+    node_id: 'node-1',
+    date: '2026-05-08',
+    provider: 'anthropic',
+    model: 'claude-3-5-sonnet',
+    event_count: 5,
+    input_tokens: 100,
+    output_tokens: 50,
+    cache_read_tokens: 0,
+    cache_creation_5m_tokens: 0,
+    cache_creation_1h_tokens: 0,
+    reasoning_tokens: 0,
+    cost_micro_usd: '5000',
+    pricing_snapshot_version: 'v1',
+    ...over,
+  }
+}
+
+describe('TeamService', () => {
+  let pool: Pool
+  let dbName: string
+  let svc: TeamService
+
+  beforeAll(async () => {
+    const created = await createServerTestDatabase()
+    pool = created.pool
+    dbName = created.dbName
+    svc = new TeamService(pool)
+  })
+
+  afterAll(async () => {
+    await dropServerTestDatabase(pool, dbName)
+  })
+
+  beforeEach(async () => {
+    await pool.query('DELETE FROM sync_conflicts')
+    await pool.query('DELETE FROM daily_aggregates')
+    await pool.query('DELETE FROM usage_events')
+    await pool.query('DELETE FROM nodes')
+    await pool.query('DELETE FROM team_members')
+    await pool.query('DELETE FROM teams')
+    await svc.ensureTeam('team-A')
+    await svc.addMember('team-A', 'user-1')
+    await svc.addMember('team-A', 'user-2')
+  })
+
+  it('inserts new events and reports them as accepted', async () => {
+    const r = await svc.batchUpsert('team-A', [evt()])
+    expect(r.accepted).toEqual(['sid-1'])
+    expect(r.duplicates).toEqual([])
+    expect(r.rejected).toEqual([])
+    expect(r.cursor).toBe(NOW)
+  })
+
+  it('is idempotent: re-uploading the same payload reports duplicate', async () => {
+    await svc.batchUpsert('team-A', [evt()])
+    const second = await svc.batchUpsert('team-A', [evt()])
+    expect(second.accepted).toEqual([])
+    expect(second.duplicates).toEqual(['sid-1'])
+    const count = await pool.query<{ n: bigint }>(`SELECT COUNT(*)::bigint AS n FROM usage_events`)
+    expect(Number(count.rows[0]!.n)).toBe(1)
+  })
+
+  it('records a conflict row when payload_hash differs for the same sync_event_id', async () => {
+    await svc.batchUpsert('team-A', [evt({ payload_hash: 'h-old', input_tokens: 10 })])
+    await svc.batchUpsert('team-A', [evt({ payload_hash: 'h-new', input_tokens: 11 })])
+    const conflicts = await pool.query<{ prior_hash: string; new_hash: string }>(
+      `SELECT prior_hash, new_hash FROM sync_conflicts`,
+    )
+    expect(conflicts.rows).toHaveLength(1)
+    expect(conflicts.rows[0]!.prior_hash).toBe('h-old')
+    expect(conflicts.rows[0]!.new_hash).toBe('h-new')
+    // Original row stays — historical immutability.
+    const row = await pool.query<{ input_tokens: bigint }>(
+      `SELECT input_tokens FROM usage_events WHERE sync_event_id = 'sid-1'`,
+    )
+    expect(Number(row.rows[0]!.input_tokens)).toBe(10)
+  })
+
+  it('rejects events whose user is not a team member', async () => {
+    const r = await svc.batchUpsert('team-A', [evt({ user_id: 'stranger' })])
+    expect(r.accepted).toEqual([])
+    expect(r.rejected).toEqual([
+      { sync_event_id: 'sid-1', reason: 'user is not a member of this team' },
+    ])
+  })
+
+  it('rejects events whose user has been revoked', async () => {
+    await svc.revokeMember('team-A', 'user-1')
+    const r = await svc.batchUpsert('team-A', [evt()])
+    expect(r.accepted).toEqual([])
+    expect(r.rejected[0]!.reason).toContain('revoked')
+  })
+
+  it('rejects events whose team_id mismatches the URL team_id (prevents cross-team smuggling)', async () => {
+    const r = await svc.batchUpsert('team-A', [evt({ team_id: 'team-B' })])
+    expect(r.accepted).toEqual([])
+    expect(r.rejected[0]!.reason).toContain('team_id mismatch')
+  })
+
+  it('two-node-same-user dedup: union of distinct events, no double counting', async () => {
+    const e1 = evt({ sync_event_id: 's-1', node_id: 'mac', local_event_id: 'l-1' })
+    const e2 = evt({ sync_event_id: 's-2', node_id: 'linux', local_event_id: 'l-1' })
+    await svc.batchUpsert('team-A', [e1])
+    await svc.batchUpsert('team-A', [e2])
+    const ov = await svc.getOverview('team-A')
+    expect(ov.totalEventCount).toBe(2)
+  })
+
+  it('upserts daily aggregates idempotently (latest wins)', async () => {
+    await svc.batchUpsert('team-A', [daily({ event_count: 5, cost_micro_usd: '500' })])
+    await svc.batchUpsert('team-A', [daily({ event_count: 7, cost_micro_usd: '700' })])
+    const r = await pool.query<{ event_count: bigint; cost: bigint }>(
+      `SELECT event_count, cost_micro_usd AS cost FROM daily_aggregates`,
+    )
+    expect(r.rows).toHaveLength(1)
+    expect(Number(r.rows[0]!.event_count)).toBe(7)
+    expect(Number(r.rows[0]!.cost)).toBe(700)
+  })
+
+  it('touches the node row on each upsert (last_seen_at advances)', async () => {
+    await svc.batchUpsert('team-A', [evt({ sync_event_id: 's-1', node_id: 'node-A' })])
+    const r1 = await pool.query<{ ts: bigint }>(
+      `SELECT last_seen_at AS ts FROM nodes WHERE id = 'node-A'`,
+    )
+    expect(r1.rows[0]!.ts).toBeDefined()
+  })
+})
+
+describe('TeamService.getOverview', () => {
+  let pool: Pool
+  let dbName: string
+  let svc: TeamService
+
+  beforeAll(async () => {
+    const created = await createServerTestDatabase()
+    pool = created.pool
+    dbName = created.dbName
+    svc = new TeamService(pool)
+  })
+
+  afterAll(async () => {
+    await dropServerTestDatabase(pool, dbName)
+  })
+
+  beforeEach(async () => {
+    await pool.query('DELETE FROM sync_conflicts')
+    await pool.query('DELETE FROM daily_aggregates')
+    await pool.query('DELETE FROM usage_events')
+    await pool.query('DELETE FROM nodes')
+    await pool.query('DELETE FROM team_members')
+    await pool.query('DELETE FROM teams')
+    await svc.ensureTeam('team-A')
+    await svc.addMember('team-A', 'user-1')
+    await svc.addMember('team-A', 'user-2')
+  })
+
+  it('aggregates per-member, per-project, per-provider', async () => {
+    await svc.batchUpsert('team-A', [
+      evt({ sync_event_id: 's1', user_id: 'user-1', cost_micro_usd: '1000', input_tokens: 10 }),
+      evt({ sync_event_id: 's2', user_id: 'user-1', cost_micro_usd: '500', input_tokens: 5 }),
+      evt({ sync_event_id: 's3', user_id: 'user-2', cost_micro_usd: '200', input_tokens: 2,
+            project_hash: 'p-other' }),
+    ])
+    const ov = await svc.getOverview('team-A')
+    expect(ov.totalEventCount).toBe(3)
+    expect(ov.totalCostMicroUsd).toBe('1700')
+    expect(ov.members.find((m) => m.userId === 'user-1')!.costMicroUsd).toBe('1500')
+    expect(ov.members.find((m) => m.userId === 'user-2')!.costMicroUsd).toBe('200')
+    // Two distinct project_hashes → two top-projects entries.
+    expect(ov.topProjects.map((p) => p.projectKey).sort()).toEqual(['p-hash-A', 'p-other'])
+  })
+
+  it('renders redacted projects with redacted=true (no leaked names)', async () => {
+    await svc.batchUpsert('team-A', [
+      evt({ sync_event_id: 's1', project: null, project_hash: 'h-1' }),
+    ])
+    const ov = await svc.getOverview('team-A')
+    expect(ov.topProjects[0]!.redacted).toBe(true)
+    expect(ov.topProjects[0]!.projectKey).toBe('h-1')
+  })
+
+  it('reports nodes registered through batchUpsert', async () => {
+    await svc.batchUpsert('team-A', [evt({ node_id: 'n-1' })])
+    const ov = await svc.getOverview('team-A')
+    expect(ov.nodes.map((n) => n.nodeId)).toContain('n-1')
+  })
+})
