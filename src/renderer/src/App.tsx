@@ -17,6 +17,7 @@ import type {
 import { AuthHeader } from './components/AuthHeader'
 import { PrivacyBanner } from './components/PrivacyBanner'
 import { timeAgo } from './lib/format'
+import { useLenisScroll } from './lib/use-lenis-scroll'
 import { AlertsTab } from './tabs/AlertsTab'
 import { OverviewTab } from './tabs/OverviewTab'
 import { ProvidersTab } from './tabs/ProvidersTab'
@@ -176,6 +177,11 @@ export function App(): JSX.Element {
   // hidden after first mount to keep their state alive cheaply.
   const [mountedTabs, setMountedTabs] = useState<Set<TabId>>(() => new Set([loadInitialTab()]))
 
+  // Lenis-driven inertia scroll on the panel. Hook returns a ref we
+  // attach to the scroll container; the hook owns the RAF loop and
+  // pauses on document.hidden so a hidden tray panel costs zero CPU.
+  const dropdownRef = useLenisScroll<HTMLDivElement>()
+
   const reload = useCallback(async () => {
     const [a, s, ps] = await Promise.all([
       window.api.aggregates(),
@@ -254,7 +260,7 @@ export function App(): JSX.Element {
   }
 
   return (
-    <div className="dropdown">
+    <div className="dropdown" ref={dropdownRef}>
       <div className="aurora" aria-hidden />
 
       <header className="dropdown-header">
