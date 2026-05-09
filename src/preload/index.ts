@@ -4,6 +4,7 @@ import {
   EVENT,
   IPC,
   type AggregateSnapshot,
+  type AuthState,
   type PricingInfo,
   type ProviderListEntry,
   type ProviderRefreshResult,
@@ -24,5 +25,14 @@ contextBridge.exposeInMainWorld('api', {
     const listener = (): void => cb()
     ipcRenderer.on(EVENT.USAGE_UPDATED, listener)
     return () => ipcRenderer.removeListener(EVENT.USAGE_UPDATED, listener)
+  },
+
+  authCurrent: (): Promise<AuthState> => ipcRenderer.invoke(IPC.AUTH_CURRENT) as Promise<AuthState>,
+  authSignIn: (): Promise<AuthState> => ipcRenderer.invoke(IPC.AUTH_SIGNIN) as Promise<AuthState>,
+  authSignOut: (): Promise<AuthState> => ipcRenderer.invoke(IPC.AUTH_SIGNOUT) as Promise<AuthState>,
+  onAuthStateChanged: (cb: (state: AuthState) => void): (() => void) => {
+    const listener = (_event: unknown, state: AuthState): void => cb(state)
+    ipcRenderer.on(EVENT.AUTH_STATE_CHANGED, listener)
+    return () => ipcRenderer.removeListener(EVENT.AUTH_STATE_CHANGED, listener)
   },
 })

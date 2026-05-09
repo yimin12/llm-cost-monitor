@@ -2,10 +2,13 @@ import { useCallback, useEffect, useState } from 'react'
 
 import type {
   AggregateSnapshot,
+  AuthState,
   PricingInfo,
   ProviderListEntry,
   StorageInfo,
 } from '@shared/ipc-channels'
+
+import { AuthHeader } from './components/AuthHeader'
 
 declare global {
   interface Window {
@@ -17,6 +20,10 @@ declare global {
       providersList: () => Promise<ProviderListEntry[]>
       providersRefresh: () => Promise<{ provider: string; error: string | null }[]>
       onUsageUpdated: (cb: () => void) => () => void
+      authCurrent: () => Promise<AuthState>
+      authSignIn: () => Promise<AuthState>
+      authSignOut: () => Promise<AuthState>
+      onAuthStateChanged: (cb: (state: AuthState) => void) => () => void
     }
   }
 }
@@ -102,6 +109,9 @@ export function App(): JSX.Element {
           {refreshing ? '↻ refreshing…' : '↻ refresh'}
         </button>
       </header>
+
+      <AuthHeader />
+
 
       <section className="totals">
         <div className="total-card">

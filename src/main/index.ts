@@ -2,6 +2,7 @@ import { app, Tray, BrowserWindow, nativeImage, screen } from 'electron'
 import path from 'path'
 
 import { Aggregator } from './aggregation/aggregator'
+import { AuthService } from './auth/auth-service'
 import { broadcastUsageUpdated, registerIpcHandlers } from './ipc'
 import { loadBundledPricing } from './pricing/load-bundled'
 import type { PricingTable } from './pricing/pricing-table'
@@ -162,7 +163,9 @@ void app.whenReady().then(async () => {
   const fileCache = new FileCache(pool)
   providers = new ProviderRegistry({ pricing, events, fileCache })
 
-  registerIpcHandlers({ pricing, events, aggregator, providers })
+  const auth = new AuthService()
+
+  registerIpcHandlers({ pricing, events, aggregator, providers, auth })
 
   app.on('before-quit', () => {
     void pool?.end().catch(() => {})
