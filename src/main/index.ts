@@ -162,14 +162,16 @@ async function updateTrayPresentation(): Promise<void> {
   }
 
   // Title text follows the user's signalling rule: when alerts pending,
-  // the menubar shows ONLY the count + word "alert(s)" — cost is
-  // intentionally hidden so the dev's eye snaps to the issue. When all
-  // clear, the cost takes the slot.
-  const alertWord = openCount === 1 ? 'alert' : 'alerts'
-  const title = hasAlerts ? `${openCount} ${alertWord}` : cost
+  // the menubar shows ONLY the count next to the warning-triangle icon —
+  // no word, no cost. The icon already carries the "alert" semantics so
+  // any extra label would be redundant. When all clear, the cost takes
+  // the slot. Linux still spells it out in the tooltip since it has no
+  // icon-swap visual signal to lean on.
+  const title = hasAlerts ? String(openCount) : cost
   if (process.platform === 'darwin') {
     tray.setTitle(title)
   } else {
+    const alertWord = openCount === 1 ? 'alert' : 'alerts'
     const tip = hasAlerts
       ? `devbar — ${openCount} ${alertWord} (${cost} today)`
       : `devbar — ${cost} today`
