@@ -114,6 +114,30 @@ describe('Aggregator (Postgres)', () => {
     expect(f.confidenceBandMicroUsd).toBe(0n)
   })
 
+  it('dailySeries returns dense local-calendar days, oldest first', async () => {
+    await repo.upsertMany([
+      makeEvent({
+        id: 'start',
+        timestamp: todayStart - 2 * 86_400_000 + 1000,
+        computedCostMicroUsd: 1000n,
+      }),
+      makeEvent({
+        id: 'today-am',
+        timestamp: todayStart + 1000,
+        computedCostMicroUsd: 2000n,
+      }),
+      makeEvent({
+        id: 'today-late',
+        timestamp: todayStart + 23 * 3_600_000,
+        computedCostMicroUsd: 3000n,
+      }),
+    ])
+
+    expect(await agg.dailySeries(3, now)).toEqual([1000n, 0n, 5000n])
+    const snap = await agg.snapshot(now)
+    expect(snap.dailyCostMicroUsd).toHaveLength(14)
+  })
+
   it('snapshot covers today/7d/30d ranges with consistent boundaries', async () => {
     const sixDaysAgo = todayStart - 6 * 24 * 3_600_000
     const eightDaysAgo = todayStart - 8 * 24 * 3_600_000

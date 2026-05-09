@@ -62,6 +62,9 @@ const RANGE_COLUMNS = `
   COUNT(*)::bigint                                  AS n
 `
 
+const DAY_MS = 24 * 60 * 60 * 1000
+const DAILY_SERIES_DAYS = 14
+
 export class Aggregator {
   constructor(private readonly pool: Pool) {}
 
@@ -174,20 +177,48 @@ export class Aggregator {
   }
 
   // Per-day cost rollup (micro-USD) over [startMs, endMs). Returns one entry
-  // per day that has at least one event.
-  async perDayCost(startMs: number, endMs: number): Promise<bigint[]> {
-    const dayMs = 24 * 60 * 60 * 1000
+  // per day that has at least one event. Day index is computed relative to
+  // `originMs` so late-evening local events don't spill into the next UTC day.
+  async perDayCost(
+    startMs: number,
+    endMs: number,
+    originMs: number = 0,
+  ): Promise<{ dayIdx: number; cost: bigint }[]> {
     const q = namedQuery(
-      `SELECT (timestamp / @bucket) AS day_idx,
+      `SELECT FLOOR((timestamp - @origin) / @bucket)::bigint AS day_idx,
               COALESCE(SUM(computed_cost_micro_usd), 0)::bigint AS cost
        FROM events
        WHERE timestamp >= @start AND timestamp < @end
        GROUP BY day_idx
        ORDER BY day_idx ASC`,
-      { start: BigInt(startMs), end: BigInt(endMs), bucket: BigInt(dayMs) },
+      {
+        start: BigInt(startMs),
+        end: BigInt(endMs),
+        bucket: BigInt(DAY_MS),
+        origin: BigInt(originMs),
+      },
     )
     const r = await this.pool.query<{ day_idx: bigint; cost: bigint }>(q.text, q.values)
-    return r.rows.map((row) => readBigint(row.cost))
+    return r.rows.map((row) => ({
+      dayIdx: Number(row.day_idx),
+      cost: readBigint(row.cost),
+    }))
+  }
+
+  // Dense daily-cost series over the last `days` calendar days, oldest first;
+  // today is the last entry. Days with no events are 0n. Local-tz aware.
+  async dailySeries(days: number, now: Date = new Date()): Promise<bigint[]> {
+    const todayStart = startOfDayMs(now)
+    const start = todayStart - (days - 1) * DAY_MS
+    const end = todayStart + DAY_MS
+    const out = new Array<bigint>(days).fill(0n)
+    const rows = await this.perDayCost(start, end, start)
+    for (const row of rows) {
+      if (row.dayIdx >= 0 && row.dayIdx < days) {
+        out[row.dayIdx] = row.cost
+      }
+    }
+    return out
   }
 
   // Linear month-end forecast with a 1σ confidence band.
@@ -195,11 +226,11 @@ export class Aggregator {
   async forecast(now: Date = new Date()): Promise<MonthlyForecast | null> {
     const monthStart = startOfMonthMs(now)
     const todayStart = startOfDayMs(now)
-    const todayEnd = todayStart + 24 * 60 * 60 * 1000
+    const todayEnd = todayStart + DAY_MS
     const dim = daysInMonth(now)
-    const daysElapsed = Math.floor((todayEnd - monthStart) / (24 * 60 * 60 * 1000))
+    const daysElapsed = Math.floor((todayEnd - monthStart) / DAY_MS)
 
-    const perDay = await this.perDayCost(monthStart, todayEnd)
+    const perDay = (await this.perDayCost(monthStart, todayEnd)).map((r) => r.cost)
     if (perDay.length < 3) return null
 
     let spent = 0n
@@ -229,21 +260,31 @@ export class Aggregator {
 
   async snapshot(now: Date = new Date()): Promise<AggregateSnapshot> {
     const todayStart = startOfDayMs(now)
-    const todayEnd = todayStart + 24 * 60 * 60 * 1000
-    const sevenDayStart = todayEnd - 7 * 24 * 60 * 60 * 1000
-    const thirtyDayStart = todayEnd - 30 * 24 * 60 * 60 * 1000
+    const todayEnd = todayStart + DAY_MS
+    const sevenDayStart = todayEnd - 7 * DAY_MS
+    const thirtyDayStart = todayEnd - 30 * DAY_MS
 
-    const [today, last7d, last30d, byProviderToday, byProvider30d, topModelsToday, topProjectsToday, forecast] =
-      await Promise.all([
-        this.rangeTotal(todayStart, todayEnd),
-        this.rangeTotal(sevenDayStart, todayEnd),
-        this.rangeTotal(thirtyDayStart, todayEnd),
-        this.byProvider(todayStart, todayEnd),
-        this.byProvider(thirtyDayStart, todayEnd),
-        this.topModels(todayStart, todayEnd, 5),
-        this.topProjects(todayStart, todayEnd, 5),
-        this.forecast(now),
-      ])
+    const [
+      today,
+      last7d,
+      last30d,
+      byProviderToday,
+      byProvider30d,
+      topModelsToday,
+      topProjectsToday,
+      forecast,
+      dailyCostMicroUsd,
+    ] = await Promise.all([
+      this.rangeTotal(todayStart, todayEnd),
+      this.rangeTotal(sevenDayStart, todayEnd),
+      this.rangeTotal(thirtyDayStart, todayEnd),
+      this.byProvider(todayStart, todayEnd),
+      this.byProvider(thirtyDayStart, todayEnd),
+      this.topModels(todayStart, todayEnd, 5),
+      this.topProjects(todayStart, todayEnd, 5),
+      this.forecast(now),
+      this.dailySeries(DAILY_SERIES_DAYS, now),
+    ])
 
     return {
       generatedAt: now.getTime(),
@@ -255,6 +296,7 @@ export class Aggregator {
       topModelsToday,
       topProjectsToday,
       forecast,
+      dailyCostMicroUsd,
     }
   }
 }

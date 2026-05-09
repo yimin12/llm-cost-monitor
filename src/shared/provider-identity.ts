@@ -25,6 +25,13 @@ const KNOWN_ALIASES: Record<string, string> = {
   gemini: 'google',
   openai: 'openai',
   openai_codex: 'openai',
+  local: 'local',
+  ollama: 'local',
+  lmstudio: 'local',
+  lm_studio: 'local',
+  'llama.cpp': 'local',
+  llama_cpp: 'local',
+  llamacpp: 'local',
   mistral: 'mistralai',
   mistralai: 'mistralai',
   ai21: 'ai21',
@@ -131,6 +138,15 @@ export function inferred(fromModel: string): string | null {
   if (lower.includes('grok')) return 'xai'
   if (lower.includes('deepseek')) return 'deepseek'
   if (lower.includes('mistral') || lower.includes('mixtral')) return 'mistralai'
+  if (
+    lower.includes('ollama') ||
+    lower.includes('lm-studio') ||
+    lower.includes('lm_studio') ||
+    lower.includes('llama.cpp') ||
+    lower.includes('llamacpp')
+  ) {
+    return 'local'
+  }
   if (lower.includes('llama') || containsDelimited(lower, 'meta')) return 'meta_llama'
   if (lower.includes('qwen')) return 'qwen'
   if (lower.includes('kimi') || lower.includes('moonshot')) return 'moonshotai'

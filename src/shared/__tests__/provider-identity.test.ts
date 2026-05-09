@@ -5,6 +5,9 @@ describe('ProviderIdentity', () => {
   it('canonicalizes known aliases', () => {
     expect(canonical('openai-codex')).toBe('openai')
     expect(canonical('gemini')).toBe('google')
+    expect(canonical('ollama')).toBe('local')
+    expect(canonical('lm-studio')).toBe('local')
+    expect(canonical('llama.cpp')).toBe('local')
     expect(canonical('vertex')).toBe('anthropic')
     expect(canonical('vertex_ai')).toBe('anthropic')
     expect(canonical('azure')).toBe('azure_ai')
@@ -56,6 +59,8 @@ describe('ProviderIdentity', () => {
     expect(inferred('glm-4.6')).toBe('zai')
     expect(inferred('mixtral-8x7b')).toBe('mistralai')
     expect(inferred('llama-3-70b')).toBe('meta_llama')
+    expect(inferred('ollama/llama3.1:8b')).toBe('local')
+    expect(inferred('lm-studio/qwen2.5-coder')).toBe('local')
   })
 
   it('inferred provider does not false-positive on lookalikes', () => {
