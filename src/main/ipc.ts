@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, shell } from 'electron'
 
 import {
   EVENT,
@@ -68,6 +68,22 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   // a user to quit was Cmd-Q from a focused window. Expose an explicit action.
   ipcMain.handle(IPC.APP_QUIT, () => {
     app.quit()
+  })
+
+  // Same renderer code runs as either the tray panel (Electron) or a
+  // full-page web dashboard (browser). In dev, both are served by the same
+  // Vite instance, so the renderer can hand off to a browser tab via
+  // shell.openExternal. In production builds the renderer is loaded via
+  // file:// and there is no web URL — so we return null and the renderer
+  // hides the link.
+  ipcMain.handle(IPC.DASHBOARD_URL, (): string | null => {
+    return process.env['ELECTRON_RENDERER_URL'] ?? null
+  })
+  ipcMain.handle(IPC.DASHBOARD_OPEN, async (): Promise<void> => {
+    const url = process.env['ELECTRON_RENDERER_URL']
+    if (typeof url === 'string' && url.length > 0) {
+      await shell.openExternal(url)
+    }
   })
 }
 

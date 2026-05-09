@@ -33,6 +33,8 @@ declare global {
       authSignOut: () => Promise<AuthState>
       onAuthStateChanged: (cb: (state: AuthState) => void) => () => void
       appQuit: () => Promise<void>
+      dashboardUrl: () => Promise<string | null>
+      openDashboard: () => Promise<void>
     }
   }
 }
@@ -116,6 +118,7 @@ export function App(): JSX.Element {
   const [refreshing, setRefreshing] = useState(false)
   const [activeTab, setActiveTab] = useState<TabId>(loadInitialTab)
   const [period, setPeriod] = useState<Period>(loadInitialPeriod)
+  const [dashboardUrl, setDashboardUrl] = useState<string | null>(null)
   const [, forceTick] = useState(0)
 
   // Track which tabs have been mounted at least once. Inactive tabs render
@@ -147,6 +150,7 @@ export function App(): JSX.Element {
   useEffect(() => {
     void window.api.pricingInfo().then(setPricing)
     void window.api.settings().then(setSettings)
+    void window.api.dashboardUrl().then(setDashboardUrl)
     void reload()
     return window.api.onUsageUpdated(scheduleReload)
   }, [reload, scheduleReload])
@@ -207,6 +211,22 @@ export function App(): JSX.Element {
           </span>
         </div>
         <div className="header-actions">
+          {dashboardUrl !== null && (
+            <button
+              type="button"
+              className="dashboard-link"
+              title={`Open full dashboard in browser (${dashboardUrl})`}
+              onClick={() => void window.api.openDashboard()}
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M14 3h7v7" />
+                <path d="M21 3l-9 9" />
+                <path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" />
+              </svg>
+              Show dashboard
+            </button>
+          )}
           <button
             type="button"
             className="refresh-btn"

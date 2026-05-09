@@ -33,6 +33,8 @@ contextBridge.exposeInMainWorld('api', {
   authSignIn: (): Promise<AuthState> => ipcRenderer.invoke(IPC.AUTH_SIGNIN) as Promise<AuthState>,
   authSignOut: (): Promise<AuthState> => ipcRenderer.invoke(IPC.AUTH_SIGNOUT) as Promise<AuthState>,
   appQuit: (): Promise<void> => ipcRenderer.invoke(IPC.APP_QUIT) as Promise<void>,
+  dashboardUrl: (): Promise<string | null> => ipcRenderer.invoke(IPC.DASHBOARD_URL) as Promise<string | null>,
+  openDashboard: (): Promise<void> => ipcRenderer.invoke(IPC.DASHBOARD_OPEN) as Promise<void>,
   onAuthStateChanged: (cb: (state: AuthState) => void): (() => void) => {
     const listener = (_event: unknown, state: AuthState): void => cb(state)
     ipcRenderer.on(EVENT.AUTH_STATE_CHANGED, listener)

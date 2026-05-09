@@ -14,6 +14,11 @@ export const IPC = {
   AUTH_SIGNIN: 'auth:signin',
   AUTH_SIGNOUT: 'auth:signout',
   APP_QUIT: 'app:quit',
+  // Returns the dev-server URL that the same renderer is served at, or null
+  // in production builds where the renderer is loaded via file://. The
+  // renderer uses this to surface a "Open in browser" link from the tray.
+  DASHBOARD_URL: 'dashboard:url',
+  DASHBOARD_OPEN: 'dashboard:open',
 } as const
 
 export const EVENT = {

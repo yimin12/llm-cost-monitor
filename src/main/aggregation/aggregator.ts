@@ -241,9 +241,12 @@ export class Aggregator {
   // session_id are excluded since they don't belong to a session.
   async recentSessions(limit: number): Promise<SessionRow[]> {
     const q = namedQuery(
+      // project is folded with MAX() — within one (provider, session_id) the
+      // project string is effectively constant; MAX picks a deterministic
+      // representative without requiring it in the GROUP BY clause.
       `SELECT session_id,
               provider,
-              COALESCE(project, '(none)') AS project,
+              COALESCE(MAX(project), '(none)') AS project,
               COALESCE(SUM(computed_cost_micro_usd), 0)::bigint AS cost,
               COUNT(*)::bigint AS n,
               MIN(timestamp)::bigint AS first_at,
