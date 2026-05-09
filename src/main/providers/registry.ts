@@ -1,3 +1,4 @@
+import type { PlanInfo } from '@shared/plan-info'
 import type { AIProvider } from '@shared/provider'
 
 import type { PricingTable } from '../pricing/pricing-table'
@@ -20,6 +21,7 @@ export interface ProviderInfo {
   isAvailable: boolean
   cliCommand: string | null
   dashboardUrl: string | null
+  plan: PlanInfo
 }
 
 export class ProviderRegistry {
@@ -42,6 +44,7 @@ export class ProviderRegistry {
         isAvailable: await p.isAvailable(),
         cliCommand: p.cliCommand,
         dashboardUrl: p.dashboardUrl,
+        plan: await p.getPlanInfo(),
       })),
     )
   }

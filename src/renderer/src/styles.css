@@ -649,6 +649,40 @@ body {
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
 }
+/* ─────────── plan chip (subscription tier vs API key) ─────────── */
+.plan-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(var(--fg), 0.5);
+  border: 1px solid var(--hairline);
+  white-space: nowrap;
+}
+.plan-chip.plan-subscription {
+  background: rgba(48, 209, 88, 0.12);
+  color: rgba(48, 209, 88, 0.95);
+  border-color: rgba(48, 209, 88, 0.22);
+}
+.plan-chip.plan-apiKey {
+  background: rgba(99, 173, 255, 0.12);
+  color: rgba(99, 173, 255, 0.95);
+  border-color: rgba(99, 173, 255, 0.24);
+}
+.plan-chip.plan-none {
+  color: rgba(var(--fg), 0.35);
+}
+.plan-chip.plan-unknown {
+  background: rgba(255, 159, 10, 0.12);
+  color: rgba(255, 159, 10, 0.95);
+  border-color: rgba(255, 159, 10, 0.22);
+}
+
 /* ─────────── auth header ─────────── */
 .auth-header {
   display: flex;
