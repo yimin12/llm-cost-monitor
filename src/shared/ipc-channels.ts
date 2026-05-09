@@ -1,4 +1,5 @@
 import type { AggregateSnapshot } from './aggregates'
+import type { Alert, AlertFilter, AlertSummary } from './alerts'
 import type { AuthState } from './auth'
 import type { AppSettings } from './settings'
 
@@ -14,16 +15,20 @@ export const IPC = {
   AUTH_SIGNIN: 'auth:signin',
   AUTH_SIGNOUT: 'auth:signout',
   APP_QUIT: 'app:quit',
-  // Returns the dev-server URL that the same renderer is served at, or null
-  // in production builds where the renderer is loaded via file://. The
-  // renderer uses this to surface a "Open in browser" link from the tray.
   DASHBOARD_URL: 'dashboard:url',
   DASHBOARD_OPEN: 'dashboard:open',
+  ALERTS_LIST: 'alerts:list',
+  ALERTS_SUMMARY: 'alerts:summary',
+  ALERTS_ACK: 'alerts:ack',
+  ALERTS_RESOLVE: 'alerts:resolve',
+  ALERTS_SNOOZE: 'alerts:snooze',
+  ALERTS_RESOLVE_ALL: 'alerts:resolveAll',
 } as const
 
 export const EVENT = {
   USAGE_UPDATED: 'usage:updated',
   AUTH_STATE_CHANGED: 'auth:state-changed',
+  ALERTS_UPDATED: 'alerts:updated',
 } as const
 
 export interface PricingInfo {
@@ -50,4 +55,4 @@ export interface ProviderRefreshResult {
   error: string | null
 }
 
-export type { AggregateSnapshot, AppSettings, AuthState }
+export type { AggregateSnapshot, Alert, AlertFilter, AlertSummary, AppSettings, AuthState }

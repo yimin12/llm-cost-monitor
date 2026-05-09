@@ -119,8 +119,44 @@ const fakePricing: PricingInfo = { snapshotVersion: '246413ab150e (preview)', mo
 const fakeStorage: StorageInfo = { eventCount: 1018 }
 const fakeSettings: AppSettings = DEFAULT_SETTINGS
 
+// Alerts demo data — matches the patterns the AlertSampler raises in main.
+import type { Alert } from '@shared/alerts'
+const seedAlerts: Alert[] = [
+  {
+    id: 'a1', type: 'system.cpu', severity: 'warning',
+    title: 'Device CPU usage is elevated',
+    body: 'helper sampled CPU usage at 100%.',
+    raisedAt: Date.now() - 6 * 60_000,
+    status: 'open', ackedAt: null, resolvedAt: null, snoozedUntil: null,
+    signature: 'system.cpu', metadata: { cpuPct: 100 },
+  },
+  {
+    id: 'a2', type: 'cost.daily', severity: 'warning',
+    title: 'Daily LLM spend threshold reached',
+    body: "today's spend is $12.40, above your $10 threshold.",
+    raisedAt: Date.now() - 24 * 3600_000,
+    status: 'open', ackedAt: null, resolvedAt: null, snoozedUntil: null,
+    signature: 'cost.daily.demo', metadata: { todayUsd: 12.4 },
+  },
+  {
+    id: 'a3', type: 'system.memory', severity: 'critical',
+    title: 'Device memory is running low',
+    body: '420 MB free of 16.0 GB (97% used).',
+    raisedAt: Date.now() - 3 * 24 * 3600_000,
+    status: 'open', ackedAt: null, resolvedAt: null, snoozedUntil: null,
+    signature: 'system.memory', metadata: { memPct: 97 },
+  },
+]
+
 export function installBrowserStub(): void {
   if (typeof window === 'undefined' || (window as unknown as { api?: unknown }).api) return
+
+  // Browser-mode alerts state — mutable so the demo UI is interactive
+  // (ack / resolve / snooze actually update the visible list).
+  let alerts: Alert[] = [...seedAlerts]
+  const subs = new Set<() => void>()
+  const broadcast = (): void => { for (const s of subs) s() }
+
   ;(window as unknown as { api: unknown }).api = {
     ping: async () => 'pong (browser-stub)',
     pricingInfo: async () => fakePricing,
@@ -130,5 +166,53 @@ export function installBrowserStub(): void {
     providersRefresh: async () => fakeProviders.map((p) => ({ provider: p.id, error: null })),
     settings: async () => fakeSettings,
     onUsageUpdated: () => () => {},
+
+    // Auth — browser-mode preview is always signed-out.
+    authCurrent: async () => ({ kind: 'signed-out' }),
+    authSignIn: async () => ({ kind: 'signed-out' }),
+    authSignOut: async () => ({ kind: 'signed-out' }),
+    onAuthStateChanged: () => () => {},
+    appQuit: async () => {},
+    dashboardUrl: async () => null,
+    openDashboard: async () => {},
+
+    // Alerts — fully interactive against the in-memory demo list.
+    alertsList: async (filter: 'open' | 'resolved' | 'all') => {
+      if (filter === 'all') return alerts
+      if (filter === 'resolved') return alerts.filter((a) => a.status === 'resolved')
+      return alerts.filter((a) => a.status !== 'resolved')
+    },
+    alertsSummary: async () => {
+      const out = { open: 0, acked: 0, snoozed: 0, resolved: 0 }
+      for (const a of alerts) {
+        if (a.status in out) out[a.status as keyof typeof out]++
+      }
+      return out
+    },
+    alertsAck: async (id: string) => {
+      alerts = alerts.map((a) => a.id === id ? { ...a, status: 'acked', ackedAt: Date.now() } : a)
+      broadcast()
+    },
+    alertsResolve: async (id: string) => {
+      alerts = alerts.map((a) => a.id === id ? { ...a, status: 'resolved', resolvedAt: Date.now() } : a)
+      broadcast()
+    },
+    alertsSnooze: async (id: string) => {
+      alerts = alerts.map((a) => a.id === id
+        ? { ...a, status: 'snoozed', snoozedUntil: Date.now() + 60 * 60_000 }
+        : a)
+      broadcast()
+    },
+    alertsResolveAll: async () => {
+      const n = alerts.filter((a) => a.status !== 'resolved').length
+      alerts = alerts.map((a) => a.status === 'resolved' ? a
+        : { ...a, status: 'resolved', resolvedAt: Date.now() })
+      broadcast()
+      return n
+    },
+    onAlertsUpdated: (cb: () => void) => {
+      subs.add(cb)
+      return () => { subs.delete(cb) }
+    },
   }
 }
