@@ -33,6 +33,7 @@
     "smoke:auth": "tsx bin/auth-smoke.ts"
   },
   "dependencies": {
+    "@resvg/resvg-js": "^2.6.2",
     "better-sqlite3": "^12.9.0",
     "jose": "^6.2.3",
     "pg": "^8.20.0",
