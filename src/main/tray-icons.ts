@@ -4,6 +4,10 @@ import { nativeImage, type NativeImage } from 'electron'
 // 16×16 alert-icon mask (warning triangle with exclamation). 1 = pixel ON.
 // Designed for macOS template images: the OS applies the system foreground
 // color, so all we ship is the mask. Linux/Windows render it as white-ish.
+//
+// Layout: rounded apex (2-px flat top), narrow exclamation stem cut out
+// rows 5–9, dot cut out row 11, and a 3-row flat base inset 1 pixel from
+// each side so the bottom corners read as rounded rather than sharp.
 const ALERT_MASK_16: ReadonlyArray<ReadonlyArray<number>> = [
   // row 0
   [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
@@ -11,17 +15,17 @@ const ALERT_MASK_16: ReadonlyArray<ReadonlyArray<number>> = [
   [0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0],
   [0,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0],
   [0,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0],
-  [0,0,0,0,0,1,1,1,1,1,1,0,0,0,0,0],
   [0,0,0,0,0,1,1,0,0,1,1,0,0,0,0,0],
   [0,0,0,0,1,1,1,0,0,1,1,1,0,0,0,0],
   [0,0,0,0,1,1,1,0,0,1,1,1,0,0,0,0],
-  [0,0,0,1,1,1,1,1,1,1,1,1,1,0,0,0],
+  [0,0,0,1,1,1,1,0,0,1,1,1,1,0,0,0],
   [0,0,0,1,1,1,1,0,0,1,1,1,1,0,0,0],
   [0,0,1,1,1,1,1,1,1,1,1,1,1,1,0,0],
-  [0,0,1,1,1,1,0,0,0,0,1,1,1,1,0,0],
+  [0,0,1,1,1,1,1,0,0,1,1,1,1,1,0,0],
   [0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0],
   [0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0],
-  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+  [0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0],
+  [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
 ]
 
 // Minimal PNG encoder for a single grayscale+alpha 16×16 frame. We stay

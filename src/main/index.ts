@@ -161,12 +161,13 @@ async function updateTrayPresentation(): Promise<void> {
     tray.setImage(baseTrayIcon)
   }
 
-  // Title text: prepend just the count when alerts pending. The swapped
-  // tray icon already conveys the "warning" semantics — repeating the
-  // ⚠ glyph in the title doubles up visually.
-  const title = hasAlerts ? `${openCount} · ${cost}` : cost
+  // Title text: just the cost. The swapped tray icon (warning triangle)
+  // alone conveys the alert state; we don't repeat the count there. The
+  // exact number is one click away in the Alerts tab. Linux still gets
+  // the count in the tooltip since there's no icon-swap visual signal
+  // to lean on.
   if (process.platform === 'darwin') {
-    tray.setTitle(title)
+    tray.setTitle(cost)
   } else {
     const tip = hasAlerts
       ? `devbar — ${openCount} alert${openCount > 1 ? 's' : ''} · ${cost} today`
