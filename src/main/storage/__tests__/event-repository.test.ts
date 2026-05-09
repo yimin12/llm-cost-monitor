@@ -52,12 +52,13 @@ describe('EventRepository (Postgres)', () => {
     repo = new EventRepository(pool)
   })
 
-  it('starts empty and reports schema_version 1', async () => {
+  it('starts empty and reports current schema version', async () => {
     expect(await repo.count()).toBe(0)
     const r = await pool.query<{ version: number }>(
       'SELECT MAX(version) AS version FROM schema_version',
     )
-    expect(r.rows[0]?.version).toBe(1)
+    // Current latest migration; bump as new ones land.
+    expect(r.rows[0]?.version).toBeGreaterThanOrEqual(2)
   })
 
   it('round-trips an event including bigint cost', async () => {

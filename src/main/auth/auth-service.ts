@@ -1,35 +1,43 @@
 import type { AuthState, AuthUser } from '@shared/auth'
+
+import type { AuthRepository } from './auth-repository'
 import { loadAuthSecrets, type AuthSecrets } from './env-loader'
-import { runGoogleOAuth, type GoogleOAuthResult } from './google-oauth'
+import {
+  refreshGoogleAccessToken,
+  runGoogleOAuth,
+  type GoogleOAuthResult,
+} from './google-oauth'
+import type { KeychainStore } from './keychain-store'
 
 // Auth service. Holds in-memory `AuthState` + a subscriber set; the IPC layer
 // rebroadcasts state changes to any open BrowserWindow.
 //
-// Persistence (Keychain refresh token + Postgres `auth_user` row) lands in
-// Slice A4. For now, sign-out is a no-op beyond clearing in-memory state and
-// signing in again starts from scratch.
+// Persistence (Slice A4): refresh_token in OS Keychain via safeStorage,
+// auth_user row in Postgres. On startup, `restoreSession()` silently mints a
+// fresh access_token from the stored refresh_token; failure → signed-out.
 
 type Listener = (state: AuthState) => void
+
+export interface AuthServiceDeps {
+  repo: AuthRepository
+  keychain: KeychainStore
+}
 
 export class AuthService {
   private state: AuthState = { kind: 'signed-out' }
   private listeners = new Set<Listener>()
   private inflight: Promise<AuthState> | null = null
-  // Keep the most recent sign-in's tokens in memory only — Slice A4 will
-  // persist refresh_token to Keychain via electron's safeStorage.
   private session: GoogleOAuthResult | null = null
 
   readonly secrets: AuthSecrets | null
 
-  constructor() {
+  constructor(private readonly deps: AuthServiceDeps) {
     this.secrets = loadAuthSecrets()
     if (this.secrets === null) {
       console.warn(
         'auth: no GCP credentials in ~/.env (need GCP_CLIENTID); sign-in disabled',
       )
     } else {
-      // Don't infer client type from .env — Desktop OAuth clients can have a
-      // leftover secret line that's simply unused. Just report what's loaded.
       console.log(
         `auth: GCP credentials loaded (client_id starts with ${this.secrets.gcpClientId.slice(0, 8)}…, secret in .env: ${this.secrets.gcpClientSecret === null ? 'no' : 'yes'})`,
       )
@@ -60,8 +68,58 @@ export class AuthService {
     for (const l of this.listeners) l(next)
   }
 
-  // Idempotent: concurrent calls fold into the same in-flight flow so two
-  // browser tabs don't open if the user double-clicks the "Sign in" button.
+  // Called once at app startup (after Pool is open and migrations run).
+  // Tries to mint a fresh access_token from a stored refresh_token + restore
+  // the user row. Silent on failure — the user just sees "signed out".
+  async restoreSession(): Promise<AuthState> {
+    if (!this.isConfigured) return this.state
+    const refreshToken = await this.deps.keychain.readRefreshToken()
+    if (refreshToken === null) return this.state
+
+    const storedUser = await this.deps.repo.findActive()
+    if (storedUser === null) {
+      // Inconsistent state — keychain has a token but no user row. Wipe.
+      await this.deps.keychain.deleteRefreshToken().catch(() => {})
+      return this.state
+    }
+
+    try {
+      const refreshed = await refreshGoogleAccessToken({
+        clientId: this.secrets!.gcpClientId,
+        clientSecret: this.secrets!.gcpClientSecret,
+        refreshToken,
+      })
+      this.session = {
+        user: refreshed.user ?? storedUser,
+        refreshToken: refreshed.newRefreshToken ?? refreshToken,
+        accessToken: refreshed.accessToken,
+        accessTokenExpiresAt: refreshed.accessTokenExpiresAt,
+      }
+      // If Google rotated the refresh token, persist the new one.
+      if (refreshed.newRefreshToken !== null) {
+        await this.deps.keychain.writeRefreshToken(refreshed.newRefreshToken)
+      }
+      const finalUser: AuthUser = {
+        ...(refreshed.user ?? storedUser),
+        // Don't bump last_signed_in_at on a silent restore — keep the truth
+        // about when the user actually pressed the button.
+        lastSignedInAt: storedUser.lastSignedInAt,
+      }
+      this.setState({ kind: 'signed-in', user: finalUser })
+      console.log(`auth: session restored for ${finalUser.email}`)
+      return this.state
+    } catch (err) {
+      // Refresh failed — token revoked, expired, network down, etc.
+      // Don't surface as an error in the UI; the user can press "Sign in"
+      // again. Wipe the bad token to avoid a loop.
+      const message = err instanceof Error ? err.message : String(err)
+      console.warn(`auth: session restore failed (${message}); wiping stored token`)
+      await this.deps.keychain.deleteRefreshToken().catch(() => {})
+      await this.deps.repo.clearActive().catch(() => {})
+      return this.state
+    }
+  }
+
   signIn(): Promise<AuthState> {
     if (this.inflight !== null) return this.inflight
     if (!this.isConfigured) {
@@ -88,13 +146,27 @@ export class AuthService {
         clientSecret: secrets.gcpClientSecret,
       })
       this.session = result
+
+      // Persist before broadcasting so the renderer never sees a "signed-in
+      // but not actually persisted" intermediate state.
+      await this.deps.repo.upsertActive(result.user)
+      if (result.refreshToken !== null) {
+        try {
+          await this.deps.keychain.writeRefreshToken(result.refreshToken)
+        } catch (err) {
+          // Keychain failures are non-fatal — sign-in still works for this
+          // session, but won't survive restart.
+          console.warn(
+            `auth: refresh token NOT persisted (${(err as Error).message}); session won't survive restart`,
+          )
+        }
+      }
+
       this.setState({ kind: 'signed-in', user: result.user })
       console.log(`auth: signed in as ${result.user.email}`)
       return this.state
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      // Surface the error in the UI without leaking secrets — Google's error
-      // bodies don't include tokens, so passing through is fine.
       console.warn(`auth: sign-in failed: ${message}`)
       this.setState({ kind: 'error', message })
       return this.state
@@ -103,6 +175,9 @@ export class AuthService {
 
   async signOut(): Promise<void> {
     this.session = null
+    await this.deps.repo.clearActive().catch(() => {})
+    await this.deps.keychain.deleteRefreshToken().catch(() => {})
     this.setState({ kind: 'signed-out' })
+    console.log('auth: signed out')
   }
 }

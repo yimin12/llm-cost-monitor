@@ -2,7 +2,9 @@ import { app, Tray, BrowserWindow, nativeImage, screen } from 'electron'
 import path from 'path'
 
 import { Aggregator } from './aggregation/aggregator'
+import { AuthRepository } from './auth/auth-repository'
 import { AuthService } from './auth/auth-service'
+import { KeychainStore } from './auth/keychain-store'
 import { broadcastUsageUpdated, registerIpcHandlers } from './ipc'
 import { loadBundledPricing } from './pricing/load-bundled'
 import type { PricingTable } from './pricing/pricing-table'
@@ -163,9 +165,15 @@ void app.whenReady().then(async () => {
   const fileCache = new FileCache(pool)
   providers = new ProviderRegistry({ pricing, events, fileCache })
 
-  const auth = new AuthService()
+  const authRepo = new AuthRepository(pool)
+  const keychain = new KeychainStore()
+  const auth = new AuthService({ repo: authRepo, keychain })
 
   registerIpcHandlers({ pricing, events, aggregator, providers, auth })
+
+  // Best-effort silent restore — a stored refresh_token + active auth_user
+  // row means we can mint a fresh access_token without any user gesture.
+  void auth.restoreSession()
 
   app.on('before-quit', () => {
     void pool?.end().catch(() => {})

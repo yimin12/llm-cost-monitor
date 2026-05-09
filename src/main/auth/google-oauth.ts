@@ -124,3 +124,61 @@ export async function runGoogleOAuth(
 function generateState(): string {
   return Math.random().toString(36).slice(2) + Date.now().toString(36)
 }
+
+export interface RefreshOptions {
+  clientId: string
+  clientSecret?: string | null
+  refreshToken: string
+}
+
+export interface RefreshResult {
+  user: AuthUser | null // Google may or may not include id_token on refresh.
+  accessToken: string
+  accessTokenExpiresAt: number
+  // Some providers rotate refresh tokens; Google usually doesn't, but pass
+  // through if a new one arrives so callers can re-persist.
+  newRefreshToken: string | null
+}
+
+// Exchange a long-lived refresh_token for a fresh access_token (and possibly
+// a new id_token + refresh_token). Used at app launch to silently restore an
+// existing session without prompting the user.
+export async function refreshGoogleAccessToken(
+  opts: RefreshOptions,
+): Promise<RefreshResult> {
+  const body = new URLSearchParams()
+  body.set('client_id', opts.clientId)
+  if (opts.clientSecret !== null && opts.clientSecret !== undefined) {
+    body.set('client_secret', opts.clientSecret)
+  }
+  body.set('refresh_token', opts.refreshToken)
+  body.set('grant_type', 'refresh_token')
+
+  const resp = await fetch(GOOGLE_TOKEN_URL, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body,
+  })
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '<no body>')
+    throw new Error(`Google /token (refresh) returned ${resp.status}: ${text}`)
+  }
+  const tok = (await resp.json()) as Partial<TokenResponse>
+
+  if (typeof tok.access_token !== 'string' || typeof tok.expires_in !== 'number') {
+    throw new Error('Google /token (refresh): missing access_token or expires_in')
+  }
+
+  let user: AuthUser | null = null
+  if (typeof tok.id_token === 'string') {
+    const verified = await verifyGoogleIdToken(tok.id_token, opts.clientId)
+    user = verified.user
+  }
+
+  return {
+    user,
+    accessToken: tok.access_token,
+    accessTokenExpiresAt: Date.now() + Math.max(0, (tok.expires_in - 30) * 1000),
+    newRefreshToken: typeof tok.refresh_token === 'string' ? tok.refresh_token : null,
+  }
+}
