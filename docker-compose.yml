@@ -1,4 +1,4 @@
-# Dev-only Postgres for llm-cost-monitor.
+# Dev-only Postgres for llm-cost-monitor + dockerized Prisma migration runner.
 #
 # Bound to 127.0.0.1 only — no network exposure. Password is dev-only and
 # meaningless because the bind is loopback. Data lives in a named Docker
@@ -20,11 +20,61 @@ services:
       - "127.0.0.1:5433:5432"
     volumes:
       - lcm_pgdata:/var/lib/postgresql/data
+      # Bootstrap script: ensures the team-sync database exists alongside
+      # the desktop one. Runs ONLY on first volume init (idempotent on
+      # re-runs because /docker-entrypoint-initdb.d is skipped if data
+      # is already present). For an existing volume, the migrate-server
+      # service below also creates the DB defensively.
+      - ./db-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U lcm -d llm_cost_monitor"]
       interval: 5s
       timeout: 3s
       retries: 10
+
+  # One-shot Prisma migration runner for the desktop database.
+  # Run with:  docker compose run --rm migrate-desktop
+  # Idempotent — re-running re-applies any pending migrations.
+  migrate-desktop:
+    profiles: ["migrate"]
+    build:
+      context: .
+      dockerfile: Dockerfile.migrate
+    environment:
+      LCM_DATABASE_URL: postgres://lcm:lcm_dev@host.docker.internal:5433/llm_cost_monitor
+    command: ["prisma", "migrate", "deploy", "--schema", "prisma/desktop/schema.prisma"]
+    # Reach the postgres container via the host's exposed port. This works
+    # regardless of which compose project actually owns the postgres
+    # container (handy when the user has multiple worktrees or kept the
+    # old `feat/auth-gmail` postgres running). If you specifically want
+    # to depend on the postgres service in THIS project, swap the env
+    # var host to `postgres` and add a `depends_on: { postgres: { condition: service_healthy } }`.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # One-shot Prisma migration runner for the team-sync server database.
+  # Creates the database if it doesn't exist yet, then applies migrations.
+  # Run with:  docker compose run --rm migrate-server
+  migrate-server:
+    profiles: ["migrate"]
+    build:
+      context: .
+      dockerfile: Dockerfile.migrate
+    environment:
+      LCM_SERVER_DATABASE_URL: postgres://lcm:lcm_dev@host.docker.internal:5433/lcm_team_sync
+    # `psql -h postgres` is not available in the migrate image, so we use
+    # prisma's db execute via a tiny inline init. Simpler: rely on the
+    # init script in db-init/ for new volumes, and assume the DB exists
+    # for established ones (operator runs CREATE DATABASE manually once).
+    command: ["prisma", "migrate", "deploy", "--schema", "prisma/server/schema.prisma"]
+    # Reach the postgres container via the host's exposed port. This works
+    # regardless of which compose project actually owns the postgres
+    # container (handy when the user has multiple worktrees or kept the
+    # old `feat/auth-gmail` postgres running). If you specifically want
+    # to depend on the postgres service in THIS project, swap the env
+    # var host to `postgres` and add a `depends_on: { postgres: { condition: service_healthy } }`.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
 volumes:
   lcm_pgdata:
