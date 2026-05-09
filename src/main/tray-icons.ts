@@ -5,27 +5,33 @@ import { nativeImage, type NativeImage } from 'electron'
 // Designed for macOS template images: the OS applies the system foreground
 // color, so all we ship is the mask. Linux/Windows render it as white-ish.
 //
-// Layout: rounded apex (2-px flat top), narrow exclamation stem cut out
-// rows 5–9, dot cut out row 11, and a 3-row flat base inset 1 pixel from
-// each side so the bottom corners read as rounded rather than sharp.
+// Layout choices (refined from earlier iterations):
+//   - 2-px-wide flat apex (rows 2–3) instead of a single-pixel point.
+//   - Stem cutout 5 rows tall × 2 cols wide (rows 4–8).
+//   - Single-row gap (row 9) so the dot reads as separate from the stem.
+//   - Dot 2 rows tall × 2 cols wide (rows 10–11) — taller than the prior
+//     1-row version which disappeared at retina rendering.
+//   - Base rounded by shaving the bottom-left and bottom-right pixels
+//     on row 14 (relative to the widest row 12–13).
+//   - Top + bottom margin rows (0–1, 15) leave the icon slightly smaller
+//     than the base tray icon, which the user reported as too chunky.
 const ALERT_MASK_16: ReadonlyArray<ReadonlyArray<number>> = [
-  // row 0
-  [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-  [0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0],
-  [0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0],
-  [0,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0],
-  [0,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0],
-  [0,0,0,0,0,1,1,0,0,1,1,0,0,0,0,0],
-  [0,0,0,0,1,1,1,0,0,1,1,1,0,0,0,0],
-  [0,0,0,0,1,1,1,0,0,1,1,1,0,0,0,0],
-  [0,0,0,1,1,1,1,0,0,1,1,1,1,0,0,0],
-  [0,0,0,1,1,1,1,0,0,1,1,1,1,0,0,0],
-  [0,0,1,1,1,1,1,1,1,1,1,1,1,1,0,0],
-  [0,0,1,1,1,1,1,0,0,1,1,1,1,1,0,0],
-  [0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0],
-  [0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0],
-  [0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0],
-  [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  /* row  0 */ [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  /* row  1 */ [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  /* row  2 */ [0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0],
+  /* row  3 */ [0,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0],
+  /* row  4 */ [0,0,0,0,0,1,1,0,0,1,1,0,0,0,0,0],
+  /* row  5 */ [0,0,0,0,0,1,1,0,0,1,1,0,0,0,0,0],
+  /* row  6 */ [0,0,0,0,1,1,1,0,0,1,1,1,0,0,0,0],
+  /* row  7 */ [0,0,0,0,1,1,1,0,0,1,1,1,0,0,0,0],
+  /* row  8 */ [0,0,0,1,1,1,1,0,0,1,1,1,1,0,0,0],
+  /* row  9 */ [0,0,0,1,1,1,1,1,1,1,1,1,1,0,0,0],
+  /* row 10 */ [0,0,1,1,1,1,1,0,0,1,1,1,1,1,0,0],
+  /* row 11 */ [0,0,1,1,1,1,1,0,0,1,1,1,1,1,0,0],
+  /* row 12 */ [0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0],
+  /* row 13 */ [0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0],
+  /* row 14 */ [0,0,1,1,1,1,1,1,1,1,1,1,1,1,0,0],
+  /* row 15 */ [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
 ]
 
 // Minimal PNG encoder for a single grayscale+alpha 16×16 frame. We stay
@@ -97,31 +103,19 @@ function buildPng16x16Alpha(mask: ReadonlyArray<ReadonlyArray<number>>): Buffer 
 
 let cachedAlertIcon: NativeImage | null = null
 
+// We tried NSCaution via createFromNamedImage and it had two problems:
+//   1. AppKit renders the named image at full menubar metrics (~22 pt),
+//      noticeably larger than our 16×16 base tray icon.
+//   2. Setting it as a template strips the inner "!" cutout (the
+//      template path only honours alpha, and NSCaution's "!" is a
+//      colored fill, not a hole), so the icon collapsed into a solid
+//      triangle silhouette.
+// Sticking with the hand-drawn 16×16 mask: the same dimensions as the
+// default tray icon, with the exclamation carved out of the alpha
+// channel so the OS tint shows through correctly on macOS templates
+// and the shape stays crisp on Linux/Windows.
 export function getAlertTrayIcon(): NativeImage {
   if (cachedAlertIcon !== null) return cachedAlertIcon
-
-  // macOS: prefer the native NSCaution system image. It's anti-aliased,
-  // sized correctly for the menubar by AppKit, and matches the SF
-  // Symbols / iOS visual language the rest of macOS uses. Setting it as
-  // a template image makes the OS tint it with the system foreground
-  // color (white on dark menubar, black on light), so we don't need a
-  // separate dark-mode asset.
-  if (process.platform === 'darwin') {
-    try {
-      const sys = nativeImage.createFromNamedImage('NSCaution', [0, 0, 0])
-      if (!sys.isEmpty()) {
-        sys.setTemplateImage(true)
-        cachedAlertIcon = sys
-        return sys
-      }
-    } catch {
-      // Fall through to the hand-drawn fallback below.
-    }
-  }
-
-  // Cross-platform fallback: hand-encoded 16×16 PNG. Used on Linux/
-  // Windows where there is no NSImage catalogue, and as a safety net if
-  // the named-image lookup ever returns empty on a future macOS.
   const buf = buildPng16x16Alpha(ALERT_MASK_16)
   const img = nativeImage.createFromBuffer(buf)
   if (process.platform === 'darwin') img.setTemplateImage(true)
