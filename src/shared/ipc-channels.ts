@@ -1,4 +1,5 @@
 import type { AggregateSnapshot } from './aggregates'
+import type { AppSettings } from './settings'
 
 export const IPC = {
   PING: 'ping',
@@ -7,6 +8,7 @@ export const IPC = {
   AGGREGATES: 'aggregates:snapshot',
   PROVIDERS_LIST: 'providers:list',
   PROVIDERS_REFRESH: 'providers:refresh',
+  SETTINGS_GET: 'settings:get',
 } as const
 
 export const EVENT = {
@@ -37,4 +39,4 @@ export interface ProviderRefreshResult {
   error: string | null
 }
 
-export type { AggregateSnapshot }
+export type { AggregateSnapshot, AppSettings }

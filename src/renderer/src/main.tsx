@@ -1,7 +1,10 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
+import { installBrowserStub } from './browser-stub'
 import './styles.css'
+
+installBrowserStub()
 
 const rootEl = document.getElementById('root')
 if (rootEl === null) {

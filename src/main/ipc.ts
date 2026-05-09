@@ -1,10 +1,18 @@
 import { BrowserWindow, ipcMain } from 'electron'
 
-import { EVENT, IPC, type AggregateSnapshot, type ProviderListEntry, type ProviderRefreshResult } from '@shared/ipc-channels'
+import {
+  EVENT,
+  IPC,
+  type AggregateSnapshot,
+  type AppSettings,
+  type ProviderListEntry,
+  type ProviderRefreshResult,
+} from '@shared/ipc-channels'
 
 import type { Aggregator } from './aggregation/aggregator'
 import type { PricingTable } from './pricing/pricing-table'
 import type { ProviderRegistry } from './providers/registry'
+import type { SettingsStore } from './settings/store'
 import type { EventRepository } from './storage/event-repository'
 
 export interface IpcDeps {
@@ -12,6 +20,7 @@ export interface IpcDeps {
   events: EventRepository
   aggregator: Aggregator
   providers: ProviderRegistry
+  settings: SettingsStore
 }
 
 export function registerIpcHandlers(deps: IpcDeps): void {
@@ -32,6 +41,7 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     broadcastUsageUpdated()
     return results
   })
+  ipcMain.handle(IPC.SETTINGS_GET, (): AppSettings => deps.settings.get())
 }
 
 export function broadcastUsageUpdated(): void {

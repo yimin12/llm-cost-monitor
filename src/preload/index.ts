@@ -4,6 +4,7 @@ import {
   EVENT,
   IPC,
   type AggregateSnapshot,
+  type AppSettings,
   type PricingInfo,
   type ProviderListEntry,
   type ProviderRefreshResult,
@@ -20,6 +21,7 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke(IPC.PROVIDERS_LIST) as Promise<ProviderListEntry[]>,
   providersRefresh: (): Promise<ProviderRefreshResult[]> =>
     ipcRenderer.invoke(IPC.PROVIDERS_REFRESH) as Promise<ProviderRefreshResult[]>,
+  settings: (): Promise<AppSettings> => ipcRenderer.invoke(IPC.SETTINGS_GET) as Promise<AppSettings>,
   onUsageUpdated: (cb: () => void): (() => void) => {
     const listener = (): void => cb()
     ipcRenderer.on(EVENT.USAGE_UPDATED, listener)

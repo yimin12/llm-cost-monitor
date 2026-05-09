@@ -5,6 +5,7 @@ import type {
   CostByProvider,
   MonthlyForecast,
   RangeTotal,
+  SessionRow,
 } from '@shared/aggregates'
 import type { DatabaseHandle } from '../storage/db'
 
@@ -52,6 +53,8 @@ export class Aggregator {
   private readonly modelRangeStmt
   private readonly projectRangeStmt
   private readonly perDayStmt
+  private readonly providerLastSeenStmt
+  private readonly recentSessionsStmt
 
   constructor(private readonly db: DatabaseHandle) {
     const rangeColumns = `
@@ -107,19 +110,54 @@ export class Aggregator {
       ORDER BY cost DESC
       LIMIT @limit
     `)
-    // Per-day rollup over a window. Day key uses local-tz day index by flooring
-    // (timestamp - tz_offset_ms) to a 24h boundary; we let SQLite group on the
-    // computed bucket. The bucket math lives in JS and is passed in as @bucket.
+    // Per-day rollup over a window. The origin is the local calendar boundary
+    // for the requested window, so late-evening local events do not spill into
+    // the next UTC day.
     this.perDayStmt = db.prepare<
-      { start: number; end: number; bucket: number },
+      { start: number; end: number; bucket: number; origin: number },
       { day_idx: bigint; cost: bigint }
     >(`
-      SELECT (timestamp / @bucket) AS day_idx,
+      SELECT CAST(((timestamp - @origin) / @bucket) AS INTEGER) AS day_idx,
              COALESCE(SUM(computed_cost_micro_usd), 0) AS cost
       FROM events
       WHERE timestamp >= @start AND timestamp < @end
       GROUP BY day_idx
       ORDER BY day_idx ASC
+    `)
+    this.providerLastSeenStmt = db.prepare<
+      Record<string, never>,
+      { provider: string; last_at: bigint }
+    >(`
+      SELECT provider, MAX(timestamp) AS last_at
+      FROM events
+      GROUP BY provider
+    `)
+    // Sessions exist only when session_id is non-null. Group by (provider,
+    // session_id) so the same session_id can never collide across providers.
+    this.recentSessionsStmt = db.prepare<
+      { limit: number },
+      {
+        session_id: string
+        provider: string
+        project: string | null
+        cost: bigint
+        n: bigint
+        first_at: bigint
+        last_at: bigint
+      }
+    >(`
+      SELECT session_id,
+             provider,
+             COALESCE(project, '(none)') AS project,
+             COALESCE(SUM(computed_cost_micro_usd), 0) AS cost,
+             COUNT(*) AS n,
+             MIN(timestamp) AS first_at,
+             MAX(timestamp) AS last_at
+      FROM events
+      WHERE session_id IS NOT NULL
+      GROUP BY provider, session_id
+      ORDER BY last_at DESC
+      LIMIT @limit
     `)
   }
 
@@ -182,8 +220,43 @@ export class Aggregator {
   perDayCost(startMs: number, endMs: number): bigint[] {
     const dayMs = 24 * 60 * 60 * 1000
     return this.perDayStmt
-      .all({ start: startMs, end: endMs, bucket: dayMs })
+      .all({ start: startMs, end: endMs, bucket: dayMs, origin: startMs })
       .map((r) => readBigint(r.cost))
+  }
+
+  // Dense daily-cost series over the last `days` calendar days, oldest first;
+  // today is the last entry. Days with no events are 0n.
+  dailySeries(days: number, now: Date = new Date()): bigint[] {
+    const dayMs = 24 * 60 * 60 * 1000
+    const todayStart = startOfDayMs(now)
+    const start = todayStart - (days - 1) * dayMs
+    const end = todayStart + dayMs
+    const out = new Array<bigint>(days).fill(0n)
+    for (const r of this.perDayStmt.all({ start, end, bucket: dayMs, origin: start })) {
+      const idx = Number(r.day_idx)
+      if (idx >= 0 && idx < days) out[idx] = readBigint(r.cost)
+    }
+    return out
+  }
+
+  providerLastSeen(): Record<string, number> {
+    const out: Record<string, number> = {}
+    for (const r of this.providerLastSeenStmt.all({})) {
+      out[r.provider] = Number(r.last_at)
+    }
+    return out
+  }
+
+  recentSessions(limit: number): SessionRow[] {
+    return this.recentSessionsStmt.all({ limit }).map((r) => ({
+      sessionId: r.session_id,
+      provider: r.provider,
+      project: r.project ?? '(none)',
+      costMicroUsd: readBigint(r.cost),
+      eventCount: readCount(r.n),
+      firstAt: Number(r.first_at),
+      lastAt: Number(r.last_at),
+    }))
   }
 
   // Linear month-end forecast with a 1σ confidence band.
@@ -244,6 +317,9 @@ export class Aggregator {
       topModelsToday: this.topModels(todayStart, todayEnd, 5),
       topProjectsToday: this.topProjects(todayStart, todayEnd, 5),
       forecast: this.forecast(now),
+      dailyCostMicroUsd: this.dailySeries(14, now),
+      providerLastSeen: this.providerLastSeen(),
+      recentSessions: this.recentSessions(50),
     }
   }
 }

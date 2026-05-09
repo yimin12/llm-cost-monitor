@@ -45,6 +45,16 @@ export interface MonthlyForecast {
   confidenceBandMicroUsd: bigint
 }
 
+export interface SessionRow {
+  sessionId: string
+  provider: string
+  project: string
+  costMicroUsd: bigint
+  eventCount: number
+  firstAt: number
+  lastAt: number
+}
+
 export interface AggregateSnapshot {
   generatedAt: number
   today: RangeTotal
@@ -55,4 +65,12 @@ export interface AggregateSnapshot {
   topModelsToday: CostByModel[]
   topProjectsToday: CostByProject[]
   forecast: MonthlyForecast | null
+  // Last 14 calendar days of cost in micro-USD, oldest → newest. Today is the
+  // last entry; days with no events are 0n. Drives the hero sparkline.
+  dailyCostMicroUsd: bigint[]
+  // Most recent activity timestamp per provider (ms epoch). Empty when no
+  // events for that provider exist.
+  providerLastSeen: Record<string, number>
+  // Most recent N sessions ordered by last activity DESC. Drives Sessions tab.
+  recentSessions: SessionRow[]
 }

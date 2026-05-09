@@ -6,6 +6,7 @@ import { broadcastUsageUpdated, registerIpcHandlers } from './ipc'
 import { loadBundledPricing } from './pricing/load-bundled'
 import type { PricingTable } from './pricing/pricing-table'
 import { ProviderRegistry } from './providers/registry'
+import { SettingsStore } from './settings/store'
 import { openDatabase, type DatabaseHandle } from './storage/db'
 import { EventRepository } from './storage/event-repository'
 import { FileCache } from './storage/file-cache'
@@ -69,10 +70,13 @@ function getWindowPosition(
   }
 }
 
+const PANEL_W = 390
+const PANEL_H = 720
+
 function createDropdownWindow(): BrowserWindow {
   const win = new BrowserWindow({
-    width: 420,
-    height: 600,
+    width: PANEL_W,
+    height: PANEL_H,
     show: false,
     frame: false,
     transparent: true,
@@ -102,7 +106,7 @@ function toggleDropdown(): void {
     return
   }
   const trayBounds = tray?.getBounds() ?? { x: 0, y: 0, width: 0, height: 0 }
-  const pos = getWindowPosition(trayBounds, { width: 420, height: 600 })
+  const pos = getWindowPosition(trayBounds, { width: PANEL_W, height: PANEL_H })
   dropdownWin.setPosition(pos.x, pos.y, false)
   dropdownWin.show()
   dropdownWin.focus()
@@ -138,8 +142,9 @@ void app.whenReady().then(async () => {
   aggregator = new Aggregator(db)
   const fileCache = new FileCache(db)
   providers = new ProviderRegistry({ pricing, events, fileCache })
+  const settings = new SettingsStore(path.join(app.getPath('userData'), 'settings.json'))
 
-  registerIpcHandlers({ pricing, events, aggregator, providers })
+  registerIpcHandlers({ pricing, events, aggregator, providers, settings })
 
   app.on('before-quit', () => {
     db?.close()
@@ -180,8 +185,8 @@ void app.whenReady().then(async () => {
 
   // Kick the initial refresh in the background — don't block startup.
   runRefresh('startup')
-  // Re-scan every 5 minutes so newly written JSONL rows show up without
-  // requiring a manual click. Cheap with the mtime cache once slice 11 lands;
-  // for now it just re-reads everything (~1s for 678 events on the test data).
-  setInterval(() => runRefresh('periodic'), 5 * 60 * 1000)
+  // Re-scan periodically so newly written JSONL rows show up without
+  // requiring a manual click. Interval is read from settings.json
+  // (refreshIntervalMs); changes require a restart until the edit UI ships.
+  setInterval(() => runRefresh('periodic'), settings.get().refreshIntervalMs)
 })

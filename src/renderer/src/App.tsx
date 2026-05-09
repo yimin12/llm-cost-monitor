@@ -1,11 +1,18 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
+import type { AggregateSnapshot } from '@shared/aggregates'
 import type {
-  AggregateSnapshot,
+  AppSettings,
   PricingInfo,
   ProviderListEntry,
   StorageInfo,
 } from '@shared/ipc-channels'
+
+import { timeAgo } from './lib/format'
+import { OverviewTab } from './tabs/OverviewTab'
+import { ProvidersTab } from './tabs/ProvidersTab'
+import { SessionsTab } from './tabs/SessionsTab'
+import { SettingsTab } from './tabs/SettingsTab'
 
 declare global {
   interface Window {
@@ -16,34 +23,80 @@ declare global {
       aggregates: () => Promise<AggregateSnapshot>
       providersList: () => Promise<ProviderListEntry[]>
       providersRefresh: () => Promise<{ provider: string; error: string | null }[]>
+      settings: () => Promise<AppSettings>
       onUsageUpdated: (cb: () => void) => () => void
     }
   }
 }
 
-function microToUsd(micro: bigint | number): string {
-  const n = typeof micro === 'bigint' ? Number(micro) : micro
-  return `$${(n / 1_000_000).toFixed(2)}`
-}
+type TabId = 'overview' | 'providers' | 'sessions' | 'settings'
+const TABS: { id: TabId; label: string; icon: JSX.Element }[] = [
+  {
+    id: 'overview',
+    label: 'Overview',
+    icon: (
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+           strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3 17l5-5 4 4 8-8" />
+        <path d="M14 8h6v6" />
+      </svg>
+    ),
+  },
+  {
+    id: 'providers',
+    label: 'Providers',
+    icon: (
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+           strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z" />
+      </svg>
+    ),
+  },
+  {
+    id: 'sessions',
+    label: 'Sessions',
+    icon: (
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+           strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+      </svg>
+    ),
+  },
+  {
+    id: 'settings',
+    label: 'Settings',
+    icon: (
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+           strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+      </svg>
+    ),
+  },
+]
 
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`
-  return String(n)
-}
+const ACTIVE_TAB_KEY = 'lcm.activeTab'
+const PERIOD_KEY = 'lcm.period'
 
-const PROVIDER_LABEL: Record<string, string> = {
-  anthropic: 'Claude',
-  openai: 'Codex',
-  google: 'Gemini',
-  moonshotai: 'Kimi',
-  deepseek: 'DeepSeek',
-  xai: 'Grok',
-  zai: 'GLM',
-}
+type Period = 'today' | '7d' | '30d'
 
-function providerName(id: string): string {
-  return PROVIDER_LABEL[id] ?? id
+function loadInitialTab(): TabId {
+  try {
+    const v = localStorage.getItem(ACTIVE_TAB_KEY)
+    if (v === 'overview' || v === 'providers' || v === 'sessions' || v === 'settings') return v
+  } catch {
+    /* localStorage unavailable */
+  }
+  return 'overview'
+}
+function loadInitialPeriod(): Period {
+  try {
+    const v = localStorage.getItem(PERIOD_KEY)
+    if (v === 'today' || v === '7d' || v === '30d') return v
+  } catch {
+    /* */
+  }
+  return 'today'
 }
 
 export function App(): JSX.Element {
@@ -51,7 +104,15 @@ export function App(): JSX.Element {
   const [pricing, setPricing] = useState<PricingInfo | null>(null)
   const [storage, setStorage] = useState<StorageInfo | null>(null)
   const [providers, setProviders] = useState<ProviderListEntry[]>([])
+  const [settings, setSettings] = useState<AppSettings | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  const [activeTab, setActiveTab] = useState<TabId>(loadInitialTab)
+  const [period, setPeriod] = useState<Period>(loadInitialPeriod)
+  const [, forceTick] = useState(0)
+
+  // Track which tabs have been mounted at least once. Inactive tabs render
+  // hidden after first mount to keep their state alive cheaply.
+  const [mountedTabs, setMountedTabs] = useState<Set<TabId>>(() => new Set([loadInitialTab()]))
 
   const reload = useCallback(async () => {
     const [a, s, ps] = await Promise.all([
@@ -64,13 +125,37 @@ export function App(): JSX.Element {
     setProviders(ps)
   }, [])
 
+  // Debounced reload — coalesce bursts of usage:updated events from
+  // back-to-back provider scans into one snapshot fetch per 250 ms.
+  const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const scheduleReload = useCallback(() => {
+    if (reloadTimer.current !== null) clearTimeout(reloadTimer.current)
+    reloadTimer.current = setTimeout(() => {
+      reloadTimer.current = null
+      void reload()
+    }, 250)
+  }, [reload])
+
   useEffect(() => {
     void window.api.pricingInfo().then(setPricing)
+    void window.api.settings().then(setSettings)
     void reload()
-    return window.api.onUsageUpdated(() => {
-      void reload()
-    })
-  }, [reload])
+    return window.api.onUsageUpdated(scheduleReload)
+  }, [reload, scheduleReload])
+
+  // Ticker for "live · Xs ago" pills.
+  useEffect(() => {
+    const id = setInterval(() => forceTick((n) => n + 1), 1000)
+    return () => clearInterval(id)
+  }, [])
+
+  useEffect(() => {
+    try { localStorage.setItem(ACTIVE_TAB_KEY, activeTab) } catch { /* */ }
+  }, [activeTab])
+
+  useEffect(() => {
+    try { localStorage.setItem(PERIOD_KEY, period) } catch { /* */ }
+  }, [period])
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true)
@@ -81,9 +166,15 @@ export function App(): JSX.Element {
     }
   }, [])
 
+  const switchTab = useCallback((id: TabId) => {
+    setActiveTab(id)
+    setMountedTabs((prev) => (prev.has(id) ? prev : new Set([...prev, id])))
+  }, [])
+
   if (agg === null) {
     return (
       <div className="dropdown loading">
+        <div className="loader-pulse" />
         <p>loading…</p>
       </div>
     )
@@ -91,157 +182,84 @@ export function App(): JSX.Element {
 
   return (
     <div className="dropdown">
+      <div className="aurora" aria-hidden />
+
       <header className="dropdown-header">
-        <span className="title">llm-cost-monitor</span>
+        <div className="title-block">
+          <span className="title-glyph" aria-hidden>
+            <svg viewBox="0 0 24 24" width="14" height="14">
+              <path d="M3 17l5-5 4 4 8-8" fill="none" stroke="currentColor" strokeWidth="2"
+                    strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </span>
+          <span className="title">llm-cost-monitor</span>
+          <span className="live-pill" title={`updated ${timeAgo(agg.generatedAt)} ago`}>
+            <span className="live-dot" />
+            <span>live · {timeAgo(agg.generatedAt)} ago</span>
+          </span>
+        </div>
         <button
           type="button"
           className="refresh-btn"
           disabled={refreshing}
           onClick={() => void handleRefresh()}
+          aria-label="Refresh"
         >
-          {refreshing ? '↻ refreshing…' : '↻ refresh'}
+          <span className={refreshing ? 'spin' : ''} aria-hidden>↻</span>
+          {refreshing ? 'refreshing' : 'refresh'}
         </button>
       </header>
 
-      <section className="totals">
-        <div className="total-card">
-          <span className="label">Today</span>
-          <span className="value">{microToUsd(agg.today.costMicroUsd)}</span>
-          <span className="sub">{agg.today.eventCount} calls</span>
-        </div>
-        <div className="total-card">
-          <span className="label">7d</span>
-          <span className="value">{microToUsd(agg.last7d.costMicroUsd)}</span>
-          <span className="sub">{agg.last7d.eventCount} calls</span>
-        </div>
-        <div className="total-card">
-          <span className="label">30d</span>
-          <span className="value">{microToUsd(agg.last30d.costMicroUsd)}</span>
-          <span className="sub">{agg.last30d.eventCount} calls</span>
-        </div>
-      </section>
+      <nav className="tab-bar" role="tablist">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === t.id}
+            className={activeTab === t.id ? 'tab-tile active' : 'tab-tile'}
+            onClick={() => switchTab(t.id)}
+          >
+            <span className="tab-tile-icon">{t.icon}</span>
+            <span className="tab-tile-label">{t.label}</span>
+          </button>
+        ))}
+      </nav>
 
-      {agg.forecast !== null && (
-        <section className="forecast">
-          <div className="forecast-row">
-            <span className="forecast-label">Spent so far</span>
-            <span className="forecast-value">{microToUsd(agg.forecast.spentMicroUsd)}</span>
-            <span className="forecast-sub">
-              day {agg.forecast.daysElapsed}/{agg.forecast.daysInMonth}
-            </span>
+      <main className="tab-pane">
+        {mountedTabs.has('overview') && (
+          <div hidden={activeTab !== 'overview'}>
+            <OverviewTab agg={agg} period={period} onPeriodChange={setPeriod} />
           </div>
-          <div className="forecast-row">
-            <span className="forecast-label">Month-end est.</span>
-            <span className="forecast-value">{microToUsd(agg.forecast.estimateMicroUsd)}</span>
-            <span className="forecast-sub">
-              ± {microToUsd(agg.forecast.confidenceBandMicroUsd)}
-            </span>
+        )}
+        {mountedTabs.has('providers') && (
+          <div hidden={activeTab !== 'providers'}>
+            <ProvidersTab agg={agg} providers={providers} />
           </div>
-        </section>
-      )}
-      {agg.forecast === null && (
-        <section className="forecast forecast-empty">
-          <span>Need ≥ 3 days of data for a month-end forecast.</span>
-        </section>
-      )}
-
-      <section className="block">
-        <h3>By provider — today</h3>
-        {agg.byProviderToday.length === 0 ? (
-          <p className="empty">no calls today yet</p>
-        ) : (
-          <ul className="rows">
-            {agg.byProviderToday.map((p) => (
-              <li key={p.provider}>
-                <span className="row-label">{providerName(p.provider)}</span>
-                <span className="row-cost">{microToUsd(p.costMicroUsd)}</span>
-                <span className="row-count">{p.eventCount}</span>
-              </li>
-            ))}
-          </ul>
         )}
-      </section>
-
-      <section className="block">
-        <h3>By provider — 30d</h3>
-        {agg.byProvider30d.length === 0 ? (
-          <p className="empty">no calls in last 30d</p>
-        ) : (
-          <ul className="rows">
-            {agg.byProvider30d.map((p) => (
-              <li key={p.provider}>
-                <span className="row-label">{providerName(p.provider)}</span>
-                <span className="row-cost">{microToUsd(p.costMicroUsd)}</span>
-                <span className="row-count">{p.eventCount}</span>
-              </li>
-            ))}
-          </ul>
+        {mountedTabs.has('sessions') && (
+          <div hidden={activeTab !== 'sessions'}>
+            <SessionsTab agg={agg} />
+          </div>
         )}
-      </section>
-
-      <section className="block">
-        <h3>Top models — today</h3>
-        {agg.topModelsToday.length === 0 ? (
-          <p className="empty">—</p>
-        ) : (
-          <ul className="rows">
-            {agg.topModelsToday.map((m) => (
-              <li key={`${m.provider}/${m.model}`}>
-                <span className="row-label" title={m.model}>
-                  {m.model}
-                </span>
-                <span className="row-cost">{microToUsd(m.costMicroUsd)}</span>
-                <span className="row-count">{m.eventCount}</span>
-              </li>
-            ))}
-          </ul>
+        {mountedTabs.has('settings') && (
+          <div hidden={activeTab !== 'settings'}>
+            <SettingsTab
+              settings={settings}
+              pricing={pricing}
+              storage={storage}
+              providers={providers}
+              lastRefreshMs={agg.generatedAt}
+            />
+          </div>
         )}
-      </section>
-
-      <section className="block">
-        <h3>Top projects — today</h3>
-        {agg.topProjectsToday.length === 0 ? (
-          <p className="empty">—</p>
-        ) : (
-          <ul className="rows">
-            {agg.topProjectsToday.map((p) => (
-              <li key={p.project}>
-                <span className="row-label">{p.project}</span>
-                <span className="row-cost">{microToUsd(p.costMicroUsd)}</span>
-                <span className="row-count">{p.eventCount}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <footer className="dropdown-footer">
-        <span>
-          {storage?.eventCount ?? 0} events · pricing {pricing?.snapshotVersion ?? '…'}
-        </span>
-        <span>
-          7d: {formatTokens(agg.last7d.inputTokens + agg.last7d.outputTokens)} tok
-        </span>
-      </footer>
-
-      <section className="block providers-list">
-        <h3>Providers</h3>
-        <ul className="rows">
-          {providers.map((p) => (
-            <li key={p.id}>
-              <span className="row-label">{p.name}</span>
-              <span className="row-cost">{p.isAvailable ? 'detected' : 'no data'}</span>
-              <span className="row-count">{p.isEnabled ? 'on' : 'off'}</span>
-            </li>
-          ))}
-        </ul>
-      </section>
+      </main>
 
       <section className="privacy">
-        <p className="privacy-line">
-          <strong>On-device only.</strong> Session logs scanned locally; no
-          telemetry, no cloud sync.
-        </p>
+        <span className="privacy-dot" />
+        <span>
+          <strong>On-device only.</strong> Session logs scanned locally · no telemetry · no cloud sync.
+        </span>
       </section>
     </div>
   )
