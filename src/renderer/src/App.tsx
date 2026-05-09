@@ -117,7 +117,7 @@ export function App(): JSX.Element {
           aria-label="Quit"
           onClick={() => void window.api.appQuit()}
         >
-          ✕
+          ⏻
         </button>
       </header>
 
