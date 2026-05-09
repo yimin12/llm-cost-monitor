@@ -826,31 +826,42 @@ body {
 
 /* ─────────── tab bar ─────────── */
 .tab-bar {
-  display: grid;
-  /* Number of tabs is fixed at 5 (Overview/Providers/Sessions/Alerts/Settings).
-     Hardcoding the column count keeps the row balanced; if a tab is added or
-     removed in the future, update this count. */
-  grid-template-columns: repeat(5, 1fr);
+  display: flex;
+  /* Tabs distribute evenly when they fit (flex: 1 0 auto on each tile) and
+     scroll horizontally when they don't, never wrap. Future tabs added beyond
+     what 390 px can show will simply slide off the right edge — the user can
+     swipe / scroll-wheel through them. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x proximity;
   gap: 1px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--hairline);
   border-radius: 12px;
   padding: 3px;
+  flex-shrink: 0;
 }
+.tab-bar::-webkit-scrollbar { display: none; }
+
 .tab-tile {
+  flex: 1 0 auto;
+  min-width: 64px;
+  scroll-snap-align: start;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 3px;
-  padding: 7px 2px 6px;
+  padding: 7px 8px 6px;
   background: transparent;
   border: 0;
   border-radius: 8px;
   color: rgba(var(--fg), 0.55);
   cursor: pointer;
   transition: background 140ms ease, color 140ms ease, box-shadow 140ms ease;
-  min-width: 0;
+  white-space: nowrap;
 }
 .tab-tile:hover:not(.active) {
   color: rgba(var(--fg), 0.85);
