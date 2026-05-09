@@ -1201,3 +1201,29 @@ body {
 }
 .toggle-pill input { accent-color: #63adff; transform: scale(0.95); }
 .mono.small { font-size: 10px; opacity: 0.7; }
+
+/* ─────────── empty-state for team tab ─────────── */
+.empty-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 16px 14px;
+  border: 1px dashed var(--hairline-strong);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.025);
+  color: rgba(var(--fg), 0.75);
+}
+.empty-tab h3 {
+  font-size: 12px;
+  font-weight: 650;
+  margin: 0;
+}
+.empty-tab p {
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgba(var(--fg), 0.6);
+}
+.team-member-row .row-label {
+  font-weight: 600;
+}

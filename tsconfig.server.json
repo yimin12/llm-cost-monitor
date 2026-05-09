@@ -11,10 +11,15 @@
     "skipLibCheck": true,
     "outDir": "out-server",
     "baseUrl": ".",
+    "paths": {
+      "@main/*": ["src/main/*"],
+      "@shared/*": ["src/shared/*"]
+    },
     "types": ["node"]
   },
   "include": [
     "server/**/*.ts",
+    "src/main/**/*.ts",
     "src/shared/**/*.ts"
   ],
   "exclude": ["node_modules", "out", "out-server", "dist"]
