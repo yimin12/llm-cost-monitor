@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { AggregateSnapshot } from '@shared/aggregates'
 import type {
+  Alert,
+  AlertFilter,
+  AlertSummary,
   AppSettings,
   AuthState,
   PricingInfo,
@@ -12,6 +15,7 @@ import type {
 import { AuthHeader } from './components/AuthHeader'
 import { PrivacyBanner } from './components/PrivacyBanner'
 import { timeAgo } from './lib/format'
+import { AlertsTab } from './tabs/AlertsTab'
 import { OverviewTab } from './tabs/OverviewTab'
 import { ProvidersTab } from './tabs/ProvidersTab'
 import { SessionsTab } from './tabs/SessionsTab'
@@ -35,11 +39,18 @@ declare global {
       appQuit: () => Promise<void>
       dashboardUrl: () => Promise<string | null>
       openDashboard: () => Promise<void>
+      alertsList: (filter: AlertFilter) => Promise<Alert[]>
+      alertsSummary: () => Promise<AlertSummary>
+      alertsAck: (id: string) => Promise<void>
+      alertsResolve: (id: string) => Promise<void>
+      alertsSnooze: (id: string) => Promise<void>
+      alertsResolveAll: () => Promise<number>
+      onAlertsUpdated: (cb: () => void) => () => void
     }
   }
 }
 
-type TabId = 'overview' | 'providers' | 'sessions' | 'settings'
+type TabId = 'overview' | 'providers' | 'sessions' | 'alerts' | 'settings'
 const TABS: { id: TabId; label: string; icon: JSX.Element }[] = [
   {
     id: 'overview',
@@ -73,6 +84,17 @@ const TABS: { id: TabId; label: string; icon: JSX.Element }[] = [
     ),
   },
   {
+    id: 'alerts',
+    label: 'Alerts',
+    icon: (
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+           strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+        <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+      </svg>
+    ),
+  },
+  {
     id: 'settings',
     label: 'Settings',
     icon: (
@@ -93,7 +115,10 @@ type Period = 'today' | '7d' | '30d'
 function loadInitialTab(): TabId {
   try {
     const v = localStorage.getItem(ACTIVE_TAB_KEY)
-    if (v === 'overview' || v === 'providers' || v === 'sessions' || v === 'settings') return v
+    if (
+      v === 'overview' || v === 'providers' || v === 'sessions' ||
+      v === 'alerts' || v === 'settings'
+    ) return v
   } catch {
     /* localStorage unavailable */
   }
@@ -119,6 +144,7 @@ export function App(): JSX.Element {
   const [activeTab, setActiveTab] = useState<TabId>(loadInitialTab)
   const [period, setPeriod] = useState<Period>(loadInitialPeriod)
   const [dashboardUrl, setDashboardUrl] = useState<string | null>(null)
+  const [alertSummary, setAlertSummary] = useState<AlertSummary>({ open: 0, acked: 0, snoozed: 0, resolved: 0 })
   const [, forceTick] = useState(0)
 
   // Track which tabs have been mounted at least once. Inactive tabs render
@@ -154,6 +180,16 @@ export function App(): JSX.Element {
     void reload()
     return window.api.onUsageUpdated(scheduleReload)
   }, [reload, scheduleReload])
+
+  // Alerts summary drives the tab badge — refreshed on every alerts:updated
+  // broadcast (including ack/resolve/snooze/raise) and on initial mount.
+  useEffect(() => {
+    const fetchSummary = (): void => {
+      void window.api.alertsSummary().then(setAlertSummary)
+    }
+    fetchSummary()
+    return window.api.onAlertsUpdated(fetchSummary)
+  }, [])
 
   // Ticker for "live · Xs ago" pills.
   useEffect(() => {
@@ -236,19 +272,30 @@ export function App(): JSX.Element {
       <AuthHeader />
 
       <nav className="tab-bar" role="tablist">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            role="tab"
-            aria-selected={activeTab === t.id}
-            className={activeTab === t.id ? 'tab-tile active' : 'tab-tile'}
-            onClick={() => switchTab(t.id)}
-          >
-            <span className="tab-tile-icon">{t.icon}</span>
-            <span className="tab-tile-label">{t.label}</span>
-          </button>
-        ))}
+        {TABS.map((t) => {
+          // Badge count = open + acked + snoozed (everything not resolved).
+          // Acked alerts still count so the badge doesn't disappear the moment
+          // the user dismisses one — they should resolve it to clear it.
+          const badge = t.id === 'alerts'
+            ? alertSummary.open + alertSummary.acked + alertSummary.snoozed
+            : 0
+          return (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === t.id}
+              className={activeTab === t.id ? 'tab-tile active' : 'tab-tile'}
+              onClick={() => switchTab(t.id)}
+            >
+              <span className="tab-tile-icon">
+                {t.icon}
+                {badge > 0 && <span className="tab-badge">{badge}</span>}
+              </span>
+              <span className="tab-tile-label">{t.label}</span>
+            </button>
+          )
+        })}
       </nav>
 
       <main className="tab-pane">
@@ -265,6 +312,11 @@ export function App(): JSX.Element {
         {mountedTabs.has('sessions') && (
           <div hidden={activeTab !== 'sessions'}>
             <SessionsTab agg={agg} />
+          </div>
+        )}
+        {mountedTabs.has('alerts') && (
+          <div hidden={activeTab !== 'alerts'}>
+            <AlertsTab />
           </div>
         )}
         {mountedTabs.has('settings') && (

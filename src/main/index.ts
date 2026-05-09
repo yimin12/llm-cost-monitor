@@ -2,10 +2,13 @@ import { app, Tray, BrowserWindow, nativeImage, screen } from 'electron'
 import path from 'path'
 
 import { Aggregator } from './aggregation/aggregator'
+import { AlertRepository } from './alerts/alert-repository'
+import { AlertNotifier } from './alerts/notifier'
+import { AlertSampler } from './alerts/sampler'
 import { AuthRepository } from './auth/auth-repository'
 import { AuthService } from './auth/auth-service'
 import { KeychainStore } from './auth/keychain-store'
-import { broadcastUsageUpdated, registerIpcHandlers } from './ipc'
+import { broadcastAlertsUpdated, broadcastUsageUpdated, registerIpcHandlers } from './ipc'
 import { loadBundledPricing } from './pricing/load-bundled'
 import type { PricingTable } from './pricing/pricing-table'
 import { ProviderRegistry } from './providers/registry'
@@ -174,7 +177,14 @@ void app.whenReady().then(async () => {
   const keychain = new KeychainStore()
   const auth = new AuthService({ repo: authRepo, keychain })
 
-  registerIpcHandlers({ pricing, events, aggregator, providers, settings, auth })
+  const alertRepo = new AlertRepository(pool)
+  const notifier = new AlertNotifier(settings)
+  const sampler = new AlertSampler(alertRepo, aggregator, settings, {
+    onRaise: (raises) => notifier.fire(raises),
+    onAnyChange: () => broadcastAlertsUpdated(),
+  })
+
+  registerIpcHandlers({ pricing, events, aggregator, providers, settings, auth, alerts: alertRepo })
 
   // Best-effort silent restore — a stored refresh_token + active auth_user
   // row means we can mint a fresh access_token without any user gesture.
@@ -223,4 +233,11 @@ void app.whenReady().then(async () => {
   // requiring a manual click. Interval is read from settings.json
   // (refreshIntervalMs); changes require a restart until the edit UI ships.
   setInterval(() => runRefresh('periodic'), settings.get().refreshIntervalMs)
+
+  // Start the alert sampler — runs every settings.alerts.samplingIntervalMs
+  // (default 30s), evaluates CPU/memory/cost thresholds, raises new alerts
+  // (deduped by signature), and fires OS notifications + ALERTS_UPDATED
+  // broadcasts when something changes.
+  sampler.start()
+  app.on('before-quit', () => sampler.stop())
 })
