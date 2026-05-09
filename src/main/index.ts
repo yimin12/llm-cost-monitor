@@ -161,16 +161,17 @@ async function updateTrayPresentation(): Promise<void> {
     tray.setImage(baseTrayIcon)
   }
 
-  // Title text: just the cost. The swapped tray icon (warning triangle)
-  // alone conveys the alert state; we don't repeat the count there. The
-  // exact number is one click away in the Alerts tab. Linux still gets
-  // the count in the tooltip since there's no icon-swap visual signal
-  // to lean on.
+  // Title text follows the user's signalling rule: when alerts pending,
+  // the menubar shows ONLY the count + word "alert(s)" — cost is
+  // intentionally hidden so the dev's eye snaps to the issue. When all
+  // clear, the cost takes the slot.
+  const alertWord = openCount === 1 ? 'alert' : 'alerts'
+  const title = hasAlerts ? `${openCount} ${alertWord}` : cost
   if (process.platform === 'darwin') {
-    tray.setTitle(cost)
+    tray.setTitle(title)
   } else {
     const tip = hasAlerts
-      ? `devbar — ${openCount} alert${openCount > 1 ? 's' : ''} · ${cost} today`
+      ? `devbar — ${openCount} ${alertWord} (${cost} today)`
       : `devbar — ${cost} today`
     tray.setToolTip(tip)
   }

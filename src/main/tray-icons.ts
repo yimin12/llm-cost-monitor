@@ -99,10 +99,31 @@ let cachedAlertIcon: NativeImage | null = null
 
 export function getAlertTrayIcon(): NativeImage {
   if (cachedAlertIcon !== null) return cachedAlertIcon
+
+  // macOS: prefer the native NSCaution system image. It's anti-aliased,
+  // sized correctly for the menubar by AppKit, and matches the SF
+  // Symbols / iOS visual language the rest of macOS uses. Setting it as
+  // a template image makes the OS tint it with the system foreground
+  // color (white on dark menubar, black on light), so we don't need a
+  // separate dark-mode asset.
+  if (process.platform === 'darwin') {
+    try {
+      const sys = nativeImage.createFromNamedImage('NSCaution', [0, 0, 0])
+      if (!sys.isEmpty()) {
+        sys.setTemplateImage(true)
+        cachedAlertIcon = sys
+        return sys
+      }
+    } catch {
+      // Fall through to the hand-drawn fallback below.
+    }
+  }
+
+  // Cross-platform fallback: hand-encoded 16×16 PNG. Used on Linux/
+  // Windows where there is no NSImage catalogue, and as a safety net if
+  // the named-image lookup ever returns empty on a future macOS.
   const buf = buildPng16x16Alpha(ALERT_MASK_16)
   const img = nativeImage.createFromBuffer(buf)
-  // On macOS the menubar paints templates with the system tint, giving us
-  // the same crisp monochrome look as the default tray icon.
   if (process.platform === 'darwin') img.setTemplateImage(true)
   cachedAlertIcon = img
   return img

@@ -1,12 +1,19 @@
 import { describe, expect, it, vi } from 'vitest'
 
-// Electron's `nativeImage` isn't available in vitest's Node sandbox. We mock
-// just enough of it to let the encoder run end-to-end and assert on the
-// PNG bytes it hands to createFromBuffer.
+// Electron's `nativeImage` isn't available in vitest's Node sandbox. We
+// mock just enough of it to let the encoder run end-to-end and assert on
+// the PNG bytes it hands to createFromBuffer. `createFromNamedImage` is
+// stubbed to return an "empty" image so the macOS preference path falls
+// through to the hand-drawn PNG buffer that this test inspects.
 vi.mock('electron', () => ({
   nativeImage: {
     createFromBuffer: (buf: Buffer) => ({
       __buffer: buf,
+      setTemplateImage: () => {},
+      isEmpty: () => false,
+    }),
+    createFromNamedImage: () => ({
+      isEmpty: () => true,
       setTemplateImage: () => {},
     }),
   },
