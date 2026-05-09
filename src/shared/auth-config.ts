@@ -4,12 +4,12 @@
 // for personal use only.
 export const OAUTH_SCOPES = ['openid', 'email', 'profile'] as const
 
-// Loopback redirect URI. Web-app-type OAuth clients require this to match
-// EXACTLY a pre-registered Authorized redirect URI in the GCP Console.
-// Pick a port that's unlikely to conflict; document it in the README so
-// the user can add it to their OAuth client config.
-export const OAUTH_LOOPBACK_PORT = 51874
-export const OAUTH_REDIRECT_URI = `http://127.0.0.1:${OAUTH_LOOPBACK_PORT}/callback`
+// Desktop OAuth client → loopback redirect with OS-assigned port (port 0).
+// Per <https://developers.google.com/identity/protocols/oauth2/native-app>,
+// any 127.0.0.1:* is allowed without per-port pre-registration. We construct
+// the redirect URI at flow time from the port the OS gives us.
+export const oauthRedirectUri = (port: number): string =>
+  `http://127.0.0.1:${port}/callback`
 
 // Google OAuth endpoints — stable URLs, baked in.
 export const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
