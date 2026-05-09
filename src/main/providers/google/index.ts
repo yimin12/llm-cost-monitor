@@ -1,3 +1,4 @@
+import type { PlanInfo } from '@shared/plan-info'
 import type { AIProvider } from '@shared/provider'
 import { emptySnapshot, type UsageSnapshot } from '@shared/snapshot'
 
@@ -5,6 +6,7 @@ import { parseGemini, resolveGeminiHome } from '../../parsers/gemini'
 import type { PricingTable } from '../../pricing/pricing-table'
 import type { EventRepository } from '../../storage/event-repository'
 import type { FileCache } from '../../storage/file-cache'
+import { detectGooglePlan } from './plan'
 
 export interface GoogleProviderDeps {
   pricing: PricingTable
@@ -45,6 +47,10 @@ export class GoogleProvider implements AIProvider {
       this.inflight = null
     })
     return this.inflight
+  }
+
+  getPlanInfo(): Promise<PlanInfo> {
+    return detectGooglePlan()
   }
 
   private async refreshImpl(): Promise<UsageSnapshot> {

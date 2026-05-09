@@ -1,6 +1,7 @@
 import type { AggregateSnapshot } from './aggregates'
 import type { Alert, AlertFilter, AlertSummary } from './alerts'
 import type { AuthState } from './auth'
+import type { PlanInfo } from './plan-info'
 import type { AppSettings } from './settings'
 
 export const IPC = {
@@ -47,6 +48,7 @@ export interface ProviderListEntry {
   isAvailable: boolean
   cliCommand: string | null
   dashboardUrl: string | null
+  plan: PlanInfo
 }
 
 export interface ProviderRefreshResult {
@@ -55,4 +57,4 @@ export interface ProviderRefreshResult {
   error: string | null
 }
 
-export type { AggregateSnapshot, Alert, AlertFilter, AlertSummary, AppSettings, AuthState }
+export type { AggregateSnapshot, Alert, AlertFilter, AlertSummary, AppSettings, AuthState, PlanInfo }

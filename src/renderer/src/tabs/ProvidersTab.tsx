@@ -56,6 +56,19 @@ export function ProvidersTab({ agg, providers, dashboardUrl }: {
                 <span className="status-pill" data-state={p.isAvailable ? 'on' : 'off'}>
                   {p.isAvailable ? 'detected' : 'no data'}
                 </span>
+                <span
+                  className={`plan-chip plan-${p.plan.authMode}`}
+                  title={
+                    p.plan.source === null
+                      ? 'No credentials detected'
+                      : `${p.plan.source}${p.plan.detail !== null ? ` · ${p.plan.detail}` : ''}`
+                  }
+                >
+                  {p.plan.authMode === 'subscription' && (p.plan.planName ?? 'Subscription')}
+                  {p.plan.authMode === 'apiKey' && 'API key'}
+                  {p.plan.authMode === 'none' && 'no auth'}
+                  {p.plan.authMode === 'unknown' && 'unknown'}
+                </span>
               </div>
               <div className="provider-card-stats">
                 <div className="stat">
