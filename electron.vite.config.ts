@@ -4,7 +4,10 @@ import { resolve } from 'path'
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()],
+    // `jose` is ESM-only; the default externalizer would require() it from CJS
+    // and crash. Excluding bundles it (transpiled to our CJS target). Same
+    // pattern would apply to any other ESM-only dep we adopt.
+    plugins: [externalizeDepsPlugin({ exclude: ['jose'] })],
     resolve: {
       alias: {
         '@main': resolve('src/main'),

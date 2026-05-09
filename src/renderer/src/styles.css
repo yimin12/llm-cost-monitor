@@ -245,6 +245,34 @@ body {
   box-shadow: 0 2px 10px rgba(99,173,255,0.35);
 }
 
+/* ─────────── header actions ─────────── */
+.header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.quit-btn {
+  background: transparent;
+  border: 1px solid rgba(255, 69, 58, 0.25);
+  border-radius: 999px;
+  color: #ff6961;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  height: 22px;
+  width: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.quit-btn:hover {
+  background: rgba(255, 69, 58, 0.18);
+  color: #ff453a;
+  border-color: rgba(255, 69, 58, 0.55);
+}
+
 /* ─────────── hero ─────────── */
 .hero {
   display: flex;
@@ -546,6 +574,56 @@ body {
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
 }
+/* ─────────── auth header ─────────── */
+.auth-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  font-size: 11px;
+}
+.auth-avatar {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.auth-email {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(var(--fg), 0.85);
+}
+.auth-error {
+  flex: 1;
+  color: #ff9f0a;
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.auth-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  color: rgb(var(--fg));
+  cursor: pointer;
+  font-size: 11px;
+  padding: 3px 10px;
+  transition: background 0.15s;
+}
+.auth-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.14);
+}
+.auth-btn:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
 .privacy {
   display: flex;
   gap: 8px;
@@ -557,6 +635,23 @@ body {
   border: 1px solid rgba(48, 209, 88, 0.14);
   border-radius: 10px;
   padding: 8px 10px;
+  flex-direction: column;
+}
+.privacy-line {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+.privacy-line.subtle {
+  color: rgba(var(--fg), 0.4);
+  font-size: 9.5px;
+}
+.privacy-line code {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  padding: 0 4px;
+  font-family: 'SF Mono', ui-monospace, Menlo, Monaco, monospace;
+  font-size: 9.5px;
 }
 .privacy-dot {
   width: 6px;

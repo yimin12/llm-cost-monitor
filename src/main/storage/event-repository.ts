@@ -1,5 +1,6 @@
 import type { UsageEvent } from '@shared/usage-event'
-import type { DatabaseHandle } from './db'
+import type { Pool } from './connect'
+import { namedQuery } from './db-utils'
 
 interface EventRow {
   id: string
@@ -51,117 +52,131 @@ function rowToEvent(r: EventRow): UsageEvent {
   }
 }
 
+const UPSERT_SQL = `
+  INSERT INTO events (
+    id, provider, provider_raw_tag, model, timestamp,
+    project, project_raw_slug, session_id, message_id,
+    input_tokens, output_tokens, cache_read_tokens,
+    cache_creation_5m_tokens, cache_creation_1h_tokens,
+    reasoning_tokens, tool_call_count, latency_ms,
+    computed_cost_micro_usd, pricing_snapshot_version,
+    source_file, source_line_offset
+  ) VALUES (
+    @id, @provider, @provider_raw_tag, @model, @timestamp,
+    @project, @project_raw_slug, @session_id, @message_id,
+    @input_tokens, @output_tokens, @cache_read_tokens,
+    @cache_creation_5m_tokens, @cache_creation_1h_tokens,
+    @reasoning_tokens, @tool_call_count, @latency_ms,
+    @computed_cost_micro_usd, @pricing_snapshot_version,
+    @source_file, @source_line_offset
+  )
+  ON CONFLICT (id) DO UPDATE SET
+    provider = EXCLUDED.provider,
+    provider_raw_tag = EXCLUDED.provider_raw_tag,
+    model = EXCLUDED.model,
+    timestamp = EXCLUDED.timestamp,
+    project = EXCLUDED.project,
+    project_raw_slug = EXCLUDED.project_raw_slug,
+    session_id = EXCLUDED.session_id,
+    message_id = EXCLUDED.message_id,
+    input_tokens = EXCLUDED.input_tokens,
+    output_tokens = EXCLUDED.output_tokens,
+    cache_read_tokens = EXCLUDED.cache_read_tokens,
+    cache_creation_5m_tokens = EXCLUDED.cache_creation_5m_tokens,
+    cache_creation_1h_tokens = EXCLUDED.cache_creation_1h_tokens,
+    reasoning_tokens = EXCLUDED.reasoning_tokens,
+    tool_call_count = EXCLUDED.tool_call_count,
+    latency_ms = EXCLUDED.latency_ms,
+    computed_cost_micro_usd = EXCLUDED.computed_cost_micro_usd,
+    pricing_snapshot_version = EXCLUDED.pricing_snapshot_version,
+    source_file = EXCLUDED.source_file,
+    source_line_offset = EXCLUDED.source_line_offset
+`
+
+function eventToParams(e: UsageEvent): Record<string, unknown> {
+  return {
+    id: e.id,
+    provider: e.provider,
+    provider_raw_tag: e.providerRawTag,
+    model: e.model,
+    // Postgres BIGINT columns accept JS number up to 2^53; pg will throw
+    // for larger. Our timestamps fit; explicit BigInt for safety.
+    timestamp: BigInt(e.timestamp),
+    project: e.project,
+    project_raw_slug: e.projectRawSlug,
+    session_id: e.sessionId,
+    message_id: e.messageId,
+    input_tokens: BigInt(e.inputTokens),
+    output_tokens: BigInt(e.outputTokens),
+    cache_read_tokens: BigInt(e.cacheReadTokens),
+    cache_creation_5m_tokens: BigInt(e.cacheCreation5mTokens),
+    cache_creation_1h_tokens: BigInt(e.cacheCreation1hTokens),
+    reasoning_tokens: e.reasoningTokens === null ? null : BigInt(e.reasoningTokens),
+    tool_call_count: e.toolCallCount === null ? null : BigInt(e.toolCallCount),
+    latency_ms: e.latencyMs === null ? null : BigInt(e.latencyMs),
+    computed_cost_micro_usd: e.computedCostMicroUsd,
+    pricing_snapshot_version: e.pricingSnapshotVersion,
+    source_file: e.sourceFile,
+    source_line_offset: BigInt(e.sourceLineOffset),
+  }
+}
+
 export class EventRepository {
-  private readonly upsertStmt
-  private readonly selectByIdStmt
-  private readonly selectBetweenStmt
-  private readonly costSumBetweenStmt
-  private readonly countStmt
+  constructor(private readonly pool: Pool) {}
 
-  constructor(private readonly db: DatabaseHandle) {
-    this.upsertStmt = db.prepare(`
-      INSERT INTO events (
-        id, provider, provider_raw_tag, model, timestamp,
-        project, project_raw_slug, session_id, message_id,
-        input_tokens, output_tokens, cache_read_tokens,
-        cache_creation_5m_tokens, cache_creation_1h_tokens,
-        reasoning_tokens, tool_call_count, latency_ms,
-        computed_cost_micro_usd, pricing_snapshot_version,
-        source_file, source_line_offset
-      ) VALUES (
-        @id, @provider, @provider_raw_tag, @model, @timestamp,
-        @project, @project_raw_slug, @session_id, @message_id,
-        @input_tokens, @output_tokens, @cache_read_tokens,
-        @cache_creation_5m_tokens, @cache_creation_1h_tokens,
-        @reasoning_tokens, @tool_call_count, @latency_ms,
-        @computed_cost_micro_usd, @pricing_snapshot_version,
-        @source_file, @source_line_offset
-      )
-      ON CONFLICT(id) DO UPDATE SET
-        provider = excluded.provider,
-        provider_raw_tag = excluded.provider_raw_tag,
-        model = excluded.model,
-        timestamp = excluded.timestamp,
-        project = excluded.project,
-        project_raw_slug = excluded.project_raw_slug,
-        session_id = excluded.session_id,
-        message_id = excluded.message_id,
-        input_tokens = excluded.input_tokens,
-        output_tokens = excluded.output_tokens,
-        cache_read_tokens = excluded.cache_read_tokens,
-        cache_creation_5m_tokens = excluded.cache_creation_5m_tokens,
-        cache_creation_1h_tokens = excluded.cache_creation_1h_tokens,
-        reasoning_tokens = excluded.reasoning_tokens,
-        tool_call_count = excluded.tool_call_count,
-        latency_ms = excluded.latency_ms,
-        computed_cost_micro_usd = excluded.computed_cost_micro_usd,
-        pricing_snapshot_version = excluded.pricing_snapshot_version,
-        source_file = excluded.source_file,
-        source_line_offset = excluded.source_line_offset
-    `)
-    this.selectByIdStmt = db.prepare<{ id: string }, EventRow>(
-      'SELECT * FROM events WHERE id = @id',
-    )
-    this.selectBetweenStmt = db.prepare<{ start: number; end: number }, EventRow>(
-      'SELECT * FROM events WHERE timestamp >= @start AND timestamp < @end ORDER BY timestamp ASC',
-    )
-    this.costSumBetweenStmt = db.prepare<
-      { start: number; end: number },
-      { total: bigint | null }
-    >(
-      'SELECT COALESCE(SUM(computed_cost_micro_usd), 0) AS total FROM events WHERE timestamp >= @start AND timestamp < @end',
-    )
-    this.countStmt = db.prepare<[], { n: bigint }>('SELECT COUNT(*) AS n FROM events')
+  async upsert(event: UsageEvent): Promise<void> {
+    const q = namedQuery(UPSERT_SQL, eventToParams(event))
+    await this.pool.query(q.text, q.values)
   }
 
-  upsert(event: UsageEvent): void {
-    this.upsertStmt.run({
-      id: event.id,
-      provider: event.provider,
-      provider_raw_tag: event.providerRawTag,
-      model: event.model,
-      timestamp: event.timestamp,
-      project: event.project,
-      project_raw_slug: event.projectRawSlug,
-      session_id: event.sessionId,
-      message_id: event.messageId,
-      input_tokens: event.inputTokens,
-      output_tokens: event.outputTokens,
-      cache_read_tokens: event.cacheReadTokens,
-      cache_creation_5m_tokens: event.cacheCreation5mTokens,
-      cache_creation_1h_tokens: event.cacheCreation1hTokens,
-      reasoning_tokens: event.reasoningTokens,
-      tool_call_count: event.toolCallCount,
-      latency_ms: event.latencyMs,
-      computed_cost_micro_usd: event.computedCostMicroUsd,
-      pricing_snapshot_version: event.pricingSnapshotVersion,
-      source_file: event.sourceFile,
-      source_line_offset: event.sourceLineOffset,
-    })
+  async upsertMany(events: readonly UsageEvent[]): Promise<void> {
+    if (events.length === 0) return
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+      for (const e of events) {
+        const q = namedQuery(UPSERT_SQL, eventToParams(e))
+        await client.query(q.text, q.values)
+      }
+      await client.query('COMMIT')
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {})
+      throw err
+    } finally {
+      client.release()
+    }
   }
 
-  upsertMany(events: readonly UsageEvent[]): void {
-    const tx = this.db.transaction((batch: readonly UsageEvent[]) => {
-      for (const e of batch) this.upsert(e)
-    })
-    tx(events)
-  }
-
-  findById(id: string): UsageEvent | null {
-    const row = this.selectByIdStmt.get({ id })
+  async findById(id: string): Promise<UsageEvent | null> {
+    const q = namedQuery('SELECT * FROM events WHERE id = @id', { id })
+    const r = await this.pool.query<EventRow>(q.text, q.values)
+    const row = r.rows[0]
     return row === undefined ? null : rowToEvent(row)
   }
 
-  between(startMs: number, endMs: number): UsageEvent[] {
-    return this.selectBetweenStmt.all({ start: startMs, end: endMs }).map(rowToEvent)
+  async between(startMs: number, endMs: number): Promise<UsageEvent[]> {
+    const q = namedQuery(
+      'SELECT * FROM events WHERE timestamp >= @start AND timestamp < @end ORDER BY timestamp ASC',
+      { start: BigInt(startMs), end: BigInt(endMs) },
+    )
+    const r = await this.pool.query<EventRow>(q.text, q.values)
+    return r.rows.map(rowToEvent)
   }
 
-  costMicroUsdBetween(startMs: number, endMs: number): bigint {
-    const row = this.costSumBetweenStmt.get({ start: startMs, end: endMs })
-    return row?.total ?? 0n
+  async costMicroUsdBetween(startMs: number, endMs: number): Promise<bigint> {
+    const q = namedQuery(
+      `SELECT COALESCE(SUM(computed_cost_micro_usd), 0)::bigint AS total
+       FROM events WHERE timestamp >= @start AND timestamp < @end`,
+      { start: BigInt(startMs), end: BigInt(endMs) },
+    )
+    const r = await this.pool.query<{ total: bigint | null }>(q.text, q.values)
+    return r.rows[0]?.total ?? 0n
   }
 
-  count(): number {
-    return Number(this.countStmt.get()?.n ?? 0n)
+  async count(): Promise<number> {
+    const r = await this.pool.query<{ n: bigint }>(
+      'SELECT COUNT(*)::bigint AS n FROM events',
+    )
+    return Number(r.rows[0]?.n ?? 0n)
   }
 }

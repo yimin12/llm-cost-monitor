@@ -12,19 +12,28 @@
     "test": "vitest run",
     "rebuild:electron": "electron-builder install-app-deps",
     "rebuild:node": "npm rebuild better-sqlite3",
-    "predev": "electron-builder install-app-deps",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down",
+    "db:logs": "docker compose logs -f postgres",
+    "db:psql": "docker compose exec postgres psql -U lcm -d llm_cost_monitor",
+    "db:reset": "docker compose down -v && docker compose up -d postgres",
+    "predev": "npm run db:up && electron-builder install-app-deps",
     "dist:mac": "npm run build && electron-builder --mac",
     "dist:linux": "npm run build && electron-builder --linux",
-    "dist": "npm run build && electron-builder --mac --linux"
+    "dist": "npm run build && electron-builder --mac --linux",
+    "smoke:auth": "tsx bin/auth-smoke.ts"
   },
   "dependencies": {
     "better-sqlite3": "^12.9.0",
+    "jose": "^6.2.3",
+    "pg": "^8.20.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.14.0",
+    "@types/pg": "^8.20.0",
     "@types/react": "^18.3.1",
     "@types/react-dom": "^18.3.1",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
@@ -36,6 +45,7 @@
     "eslint": "^9.0.0",
     "eslint-plugin-react-hooks": "^5.0.0",
     "prettier": "^3.3.3",
+    "tsx": "^4.21.0",
     "typescript": "^5.5.4",
     "vite": "^5.3.4",
     "vitest": "^2.0.5"

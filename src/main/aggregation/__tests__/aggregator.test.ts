@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import type { UsageEvent } from '@shared/usage-event'
-import { openDatabase, type DatabaseHandle } from '../../storage/db'
+import type { Pool } from '../../storage/connect'
 import { EventRepository } from '../../storage/event-repository'
+import { createTestDatabase, dropTestDatabase } from '../../storage/__tests__/test-helpers'
 import { Aggregator, startOfDayMs } from '../aggregator'
 
 function makeEvent(partial: Pick<UsageEvent, 'id' | 'timestamp'> & Partial<UsageEvent>): UsageEvent {
@@ -33,53 +34,62 @@ function makeEvent(partial: Pick<UsageEvent, 'id' | 'timestamp'> & Partial<Usage
   }
 }
 
-describe('Aggregator', () => {
-  let db: DatabaseHandle
+describe('Aggregator (Postgres)', () => {
+  let pool: Pool
+  let dbName: string
   let repo: EventRepository
   let agg: Aggregator
   const now = new Date('2026-05-06T10:00:00.000Z')
   const todayStart = startOfDayMs(now)
 
-  beforeEach(() => {
-    db = openDatabase(':memory:')
-    repo = new EventRepository(db)
-    agg = new Aggregator(db)
+  beforeAll(async () => {
+    const ctx = await createTestDatabase()
+    pool = ctx.pool
+    dbName = ctx.dbName
+  }, 30_000)
+
+  afterAll(async () => {
+    await dropTestDatabase(pool, dbName)
   })
 
-  it('rangeTotal sums cost + tokens within window', () => {
-    repo.upsertMany([
+  beforeEach(async () => {
+    await pool.query('TRUNCATE TABLE events')
+    repo = new EventRepository(pool)
+    agg = new Aggregator(pool)
+  })
+
+  it('rangeTotal sums cost + tokens within window', async () => {
+    await repo.upsertMany([
       makeEvent({ id: '1', timestamp: todayStart + 1000, computedCostMicroUsd: 1000n, inputTokens: 100, outputTokens: 50 }),
       makeEvent({ id: '2', timestamp: todayStart + 2000, computedCostMicroUsd: 2000n, inputTokens: 200, outputTokens: 100 }),
     ])
-    const t = agg.rangeTotal(todayStart, todayStart + 24 * 3_600_000)
+    const t = await agg.rangeTotal(todayStart, todayStart + 24 * 3_600_000)
     expect(t.costMicroUsd).toBe(3000n)
     expect(t.inputTokens).toBe(300)
     expect(t.outputTokens).toBe(150)
     expect(t.eventCount).toBe(2)
   })
 
-  it('byProvider groups by provider id, sorted by cost desc', () => {
-    repo.upsertMany([
+  it('byProvider groups by provider id, sorted by cost desc', async () => {
+    await repo.upsertMany([
       makeEvent({ id: '1', timestamp: todayStart + 1000, provider: 'anthropic', computedCostMicroUsd: 5000n }),
       makeEvent({ id: '2', timestamp: todayStart + 1000, provider: 'openai', computedCostMicroUsd: 1000n }),
       makeEvent({ id: '3', timestamp: todayStart + 1000, provider: 'google', computedCostMicroUsd: 3000n }),
     ])
-    const rows = agg.byProvider(todayStart, todayStart + 24 * 3_600_000)
+    const rows = await agg.byProvider(todayStart, todayStart + 24 * 3_600_000)
     expect(rows.map((r) => r.provider)).toEqual(['anthropic', 'google', 'openai'])
     expect(rows.map((r) => r.costMicroUsd)).toEqual([5000n, 3000n, 1000n])
   })
 
-  it('forecast returns null when fewer than 3 days of data', () => {
-    repo.upsertMany([
+  it('forecast returns null when fewer than 3 days of data', async () => {
+    await repo.upsertMany([
       makeEvent({ id: '1', timestamp: todayStart, computedCostMicroUsd: 1000n }),
       makeEvent({ id: '2', timestamp: todayStart - 86_400_000, computedCostMicroUsd: 2000n }),
     ])
-    expect(agg.forecast(now)).toBeNull()
+    expect(await agg.forecast(now)).toBeNull()
   })
 
-  it('forecast linearly projects MTD to month-end', () => {
-    // May 2026 has 31 days. Today simulated as May 6 = day 6.
-    // Seed days 1-6 with consistent $1/day cost.
+  it('forecast linearly projects MTD to month-end', async () => {
     const may1 = new Date('2026-05-01T12:00:00.000Z')
     const may1Start = startOfDayMs(may1)
     const eventsList = []
@@ -88,38 +98,60 @@ describe('Aggregator', () => {
         makeEvent({
           id: `d${d}`,
           timestamp: may1Start + d * 86_400_000 + 1000,
-          computedCostMicroUsd: 1_000_000n, // $1/day
+          computedCostMicroUsd: 1_000_000n,
         }),
       )
     }
-    repo.upsertMany(eventsList)
+    await repo.upsertMany(eventsList)
     const sim = new Date('2026-05-06T12:00:00.000Z')
-    const f = agg.forecast(sim)
+    const f = await agg.forecast(sim)
     expect(f).not.toBeNull()
     if (f === null) return
     expect(f.daysInMonth).toBe(31)
     expect(f.daysElapsed).toBe(6)
     expect(f.spentMicroUsd).toBe(6_000_000n)
-    // Linear projection: 6_000_000 × 31 / 6 = 31_000_000 ($31)
     expect(f.estimateMicroUsd).toBe(31_000_000n)
-    // Stddev of [1,1,1,1,1,1] is 0 → band = 0.
     expect(f.confidenceBandMicroUsd).toBe(0n)
   })
 
-  it('providerLastSeen returns MAX(timestamp) per provider', () => {
-    repo.upsertMany([
+  it('dailySeries returns dense local-calendar days, oldest first', async () => {
+    await repo.upsertMany([
+      makeEvent({
+        id: 'start',
+        timestamp: todayStart - 2 * 86_400_000 + 1000,
+        computedCostMicroUsd: 1000n,
+      }),
+      makeEvent({
+        id: 'today-am',
+        timestamp: todayStart + 1000,
+        computedCostMicroUsd: 2000n,
+      }),
+      makeEvent({
+        id: 'today-late',
+        timestamp: todayStart + 23 * 3_600_000,
+        computedCostMicroUsd: 3000n,
+      }),
+    ])
+
+    expect(await agg.dailySeries(3, now)).toEqual([1000n, 0n, 5000n])
+    const snap = await agg.snapshot(now)
+    expect(snap.dailyCostMicroUsd).toHaveLength(14)
+  })
+
+  it('providerLastSeen returns MAX(timestamp) per provider', async () => {
+    await repo.upsertMany([
       makeEvent({ id: 'a1', timestamp: todayStart + 1000, provider: 'anthropic' }),
       makeEvent({ id: 'a2', timestamp: todayStart + 5000, provider: 'anthropic' }),
       makeEvent({ id: 'o1', timestamp: todayStart + 2000, provider: 'openai' }),
     ])
-    const seen = agg.providerLastSeen()
+    const seen = await agg.providerLastSeen()
     expect(seen['anthropic']).toBe(todayStart + 5000)
     expect(seen['openai']).toBe(todayStart + 2000)
     expect(seen['google']).toBeUndefined()
   })
 
-  it('recentSessions groups by (provider, session_id), ordered by lastAt desc', () => {
-    repo.upsertMany([
+  it('recentSessions groups by (provider, session_id), ordered by lastAt desc', async () => {
+    await repo.upsertMany([
       // Session A: anthropic, 2 events spanning 5 minutes
       makeEvent({ id: 'a1', timestamp: todayStart + 1_000, sessionId: 'sess-A', provider: 'anthropic', computedCostMicroUsd: 1000n }),
       makeEvent({ id: 'a2', timestamp: todayStart + 301_000, sessionId: 'sess-A', provider: 'anthropic', computedCostMicroUsd: 2000n }),
@@ -128,7 +160,7 @@ describe('Aggregator', () => {
       // Event with no session_id — must be excluded
       makeEvent({ id: 'n1', timestamp: todayStart + 1000, sessionId: null, provider: 'google' }),
     ])
-    const sessions = agg.recentSessions(50)
+    const sessions = await agg.recentSessions(50)
     expect(sessions).toHaveLength(2)
     expect(sessions[0]!.sessionId).toBe('sess-B')
     expect(sessions[0]!.provider).toBe('openai')
@@ -140,7 +172,7 @@ describe('Aggregator', () => {
     expect(sessions[1]!.lastAt).toBe(todayStart + 301_000)
   })
 
-  it('recentSessions respects limit', () => {
+  it('recentSessions respects limit', async () => {
     const eventsList = []
     for (let i = 0; i < 5; i++) {
       eventsList.push(
@@ -152,26 +184,24 @@ describe('Aggregator', () => {
         }),
       )
     }
-    repo.upsertMany(eventsList)
-    expect(agg.recentSessions(2)).toHaveLength(2)
-    expect(agg.recentSessions(10)).toHaveLength(5)
+    await repo.upsertMany(eventsList)
+    expect(await agg.recentSessions(2)).toHaveLength(2)
+    expect(await agg.recentSessions(10)).toHaveLength(5)
   })
 
-  it('snapshot covers today/7d/30d ranges with consistent boundaries', () => {
+  it('snapshot covers today/7d/30d ranges with consistent boundaries', async () => {
     const sixDaysAgo = todayStart - 6 * 24 * 3_600_000
     const eightDaysAgo = todayStart - 8 * 24 * 3_600_000
     const twentyDaysAgo = todayStart - 20 * 24 * 3_600_000
-    repo.upsertMany([
+    await repo.upsertMany([
       makeEvent({ id: 'today', timestamp: todayStart + 1000, computedCostMicroUsd: 1000n }),
       makeEvent({ id: '6d', timestamp: sixDaysAgo + 1000, computedCostMicroUsd: 2000n }),
       makeEvent({ id: '8d', timestamp: eightDaysAgo + 1000, computedCostMicroUsd: 4000n }),
       makeEvent({ id: '20d', timestamp: twentyDaysAgo + 1000, computedCostMicroUsd: 8000n }),
     ])
-    const snap = agg.snapshot(now)
+    const snap = await agg.snapshot(now)
     expect(snap.today.costMicroUsd).toBe(1000n)
-    // 7d window includes today + 6d but not 8d.
     expect(snap.last7d.costMicroUsd).toBe(3000n)
-    // 30d covers all four.
     expect(snap.last30d.costMicroUsd).toBe(15000n)
   })
 })

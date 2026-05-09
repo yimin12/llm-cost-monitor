@@ -3,11 +3,14 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AggregateSnapshot } from '@shared/aggregates'
 import type {
   AppSettings,
+  AuthState,
   PricingInfo,
   ProviderListEntry,
   StorageInfo,
 } from '@shared/ipc-channels'
 
+import { AuthHeader } from './components/AuthHeader'
+import { PrivacyBanner } from './components/PrivacyBanner'
 import { timeAgo } from './lib/format'
 import { OverviewTab } from './tabs/OverviewTab'
 import { ProvidersTab } from './tabs/ProvidersTab'
@@ -25,6 +28,11 @@ declare global {
       providersRefresh: () => Promise<{ provider: string; error: string | null }[]>
       settings: () => Promise<AppSettings>
       onUsageUpdated: (cb: () => void) => () => void
+      authCurrent: () => Promise<AuthState>
+      authSignIn: () => Promise<AuthState>
+      authSignOut: () => Promise<AuthState>
+      onAuthStateChanged: (cb: (state: AuthState) => void) => () => void
+      appQuit: () => Promise<void>
     }
   }
 }
@@ -198,17 +206,30 @@ export function App(): JSX.Element {
             <span>live · {timeAgo(agg.generatedAt)} ago</span>
           </span>
         </div>
-        <button
-          type="button"
-          className="refresh-btn"
-          disabled={refreshing}
-          onClick={() => void handleRefresh()}
-          aria-label="Refresh"
-        >
-          <span className={refreshing ? 'spin' : ''} aria-hidden>↻</span>
-          {refreshing ? 'refreshing' : 'refresh'}
-        </button>
+        <div className="header-actions">
+          <button
+            type="button"
+            className="refresh-btn"
+            disabled={refreshing}
+            onClick={() => void handleRefresh()}
+            aria-label="Refresh"
+          >
+            <span className={refreshing ? 'spin' : ''} aria-hidden>↻</span>
+            {refreshing ? 'refreshing' : 'refresh'}
+          </button>
+          <button
+            type="button"
+            className="quit-btn"
+            title="Quit llm-cost-monitor"
+            aria-label="Quit"
+            onClick={() => void window.api.appQuit()}
+          >
+            ⏻
+          </button>
+        </div>
       </header>
+
+      <AuthHeader />
 
       <nav className="tab-bar" role="tablist">
         {TABS.map((t) => (
@@ -255,12 +276,7 @@ export function App(): JSX.Element {
         )}
       </main>
 
-      <section className="privacy">
-        <span className="privacy-dot" />
-        <span>
-          <strong>On-device only.</strong> Session logs scanned locally · no telemetry · no cloud sync.
-        </span>
-      </section>
+      <PrivacyBanner />
     </div>
   )
 }

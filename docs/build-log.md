@@ -7,10 +7,107 @@ Companion docs:
 - [`docs/architecture.md`](./architecture.md) — decision record D1–D15
 - [`docs/cost-validation.md`](./cost-validation.md) — cost-accuracy audit
 - [`docs/cli-pulse-feature-spec.md`](./cli-pulse-feature-spec.md) — competitor reverse-engineering
+- [`docs/auth-plan.md`](./auth-plan.md) — auth + Postgres plan (active on `feat/auth-gmail`)
 
 ---
 
-## 2026-05-07 — Current state
+## 2026-05-08 — Auth slices A2–A6 done; PR #1 open; live OAuth validated
+
+User created a **Desktop**-type OAuth client in GCP Console (client_id
+`474644305609-itbl41…`); credentials in `~/.env` as `GCP_CLIENTID` +
+`GCP_CLIENTSECRET` (secret unused for Desktop type, harmless leftover).
+
+**Slices A2–A6 + Quit button done autonomously on `feat/auth-gmail`:**
+- A2 — auth scaffold: types, IPC stubs, `<AuthHeader />` rendering signed-out state
+- A3 — full PKCE + loopback + token exchange + ID-token verification:
+  - `src/main/auth/pkce.ts` — RFC 7636 verifier + S256 challenge
+  - `src/main/auth/loopback-server.ts` — one-shot `127.0.0.1:0` HTTP server
+  - `src/main/auth/google-oauth.ts` — orchestrates auth + refresh flows
+  - `src/main/auth/id-token-verify.ts` — `jose` against Google JWKS
+  - `electron.vite.config.ts` — bundle `jose` (ESM-only) into the CJS main output
+- A4 — persistence + auto-restore:
+  - `migrations/0002_auth_user.sql` — schema v2 adds `auth_user`
+  - `src/main/auth/auth-repository.ts` — single-active-account upsert/clear
+  - `src/main/auth/keychain-store.ts` — Electron `safeStorage`-encrypted
+    refresh-token file (mode 0o600) under userData
+  - `AuthService.restoreSession()` — silent mint of access_token from
+    stored refresh_token at startup
+- A5 — UX polish + privacy update:
+  - `<PrivacyBanner />` grows a 2nd line when signed-in
+  - `docs/privacy.md` — full trust statement (mirrors CLI Pulse §10)
+  - architecture.md D14 rewritten to enumerate exactly which network
+    calls happen
+- A6 — `RemoteUsageProbe` extension stub for the future cloud-sync seam
+- Bonus — `bin/auth-smoke.ts` runtime test (`npm run smoke:auth`)
+- Bonus — visible Quit button (⏻ power icon, red-tinted) in the
+  dropdown header so a tray-only app has an obvious quit action
+
+**Live-validated via runtime monitor events:**
+- `auth: signed in as hymlaucs@gmail.com` — full OAuth round-trip
+- `auth: signed out` — Keychain file deleted + `auth_user.is_active`
+  flipped to FALSE
+- `npm run smoke:auth` — PKCE / env-load / loopback / /authorize URL /
+  /token reachability all green
+
+**Pushed:**
+- `feat/auth-gmail` to `https://github.com/yimin12/llm-cost-monitor`
+- **PR #1** open: `feat/auth-gmail → main`
+  (https://github.com/yimin12/llm-cost-monitor/pull/1)
+- 11 commits ahead of main: plan + Postgres + A2-A6 + smoke + Quit
+  + ⏻ icon swap
+
+**Main also pushed** (`027a79a`) — bundles in-flight UI polish that had
+been accumulating in the worktree while auth/Postgres was on the side
+branch: dropdown sparkline, daily series, share bars, brand colors,
+LiteLLM supplemental price aliases, local provider identification
+(Ollama / LM Studio / llama.cpp), end-to-end integration test.
+
+**Pending:**
+- User confirmation of auto-restore (quit + restart should silently
+  restore the signed-in session — the `auth: session restored for ...`
+  console line proves it)
+- Merge conflicts at PR merge time (sparkline/dailySeries on main vs
+  Postgres on the branch — both localized; will resolve cleanly)
+
+---
+
+## 2026-05-07 (later) — Postgres migration on `feat/auth-gmail`
+
+User locked **Option A** (identity-only Sign in with Google) and
+**Postgres-in-Docker** for relational persistence. Dev-only; shipped builds
+keep SQLite. Single branch for both.
+
+**Slice 0 (Postgres bring-up) done autonomously:**
+- `docker-compose.yml` — postgres:17-alpine, `127.0.0.1:5433`, named volume
+- `migrations/0001_init.sql` — schema v1 in Postgres BIGINT-everywhere flavor
+- `src/main/storage/connect.ts` — pg.Pool with retry-with-backoff + bigint typeparser
+- `src/main/storage/migrations.ts` — file-based migration runner
+- `src/main/storage/db-utils.ts` — `@name → $N` translator
+- `src/main/storage/{event-repository,file-cache}.ts` — async ports
+- `src/main/aggregation/aggregator.ts` — async port; every `SUM(BIGINT)` cast `::bigint` to defeat NUMERIC return
+- All parsers + providers + IPC awaited
+- Tests ported to per-file ephemeral Postgres DBs via `test-helpers.ts`
+- `src/main/storage/db.ts` (better-sqlite3 entry) deleted
+
+**End-to-end validated:**
+- Postgres 17.9 healthy on `127.0.0.1:5433`
+- `storage migrated to v1` on first connect
+- 1,063 events ingested across Anthropic ($104) / OpenAI ($64) / Google ($0.02)
+- 31 files in mtime cache
+- 47/47 vitest cases green
+
+**OAuth quota (CLI Pulse P1) deferred** — user's Claude credentials are in
+macOS Keychain, not in `~/.claude/.credentials.json` on this machine.
+
+**Deferred follow-ups on this branch:**
+- SQLite-fallback for shipped builds (interface + factory layer)
+- `bin/import-from-sqlite.ts` (currently re-derived from JSONL on refresh)
+- Slice A1+ — Google Cloud Console OAuth client + identity flow (waiting
+  on user to walk through `auth-plan.md` §8)
+
+---
+
+## 2026-05-07 — Current state on `main`
 
 **Repo:** `https://github.com/yimin12/llm-cost-monitor` (private). Commits on `main`:
 

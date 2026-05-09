@@ -2,12 +2,13 @@ import { mkdtemp, mkdir, writeFile, appendFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { parseClaude, parseClaudeFile } from '../../parsers/claude-code'
 import { PricingTable } from '../../pricing/pricing-table'
-import { openDatabase, type DatabaseHandle } from '../db'
+import type { Pool } from '../connect'
 import { FileCache } from '../file-cache'
+import { createTestDatabase, dropTestDatabase } from './test-helpers'
 
 const PRICING = PricingTable.fromBuffer(
   Buffer.from(
@@ -34,13 +35,24 @@ function row(id: string, ts: string, input: number): string {
   })
 }
 
-describe('FileCache + parser', () => {
-  let db: DatabaseHandle
+describe('FileCache + parser (Postgres)', () => {
+  let pool: Pool
+  let dbName: string
   let cache: FileCache
 
-  beforeEach(() => {
-    db = openDatabase(':memory:')
-    cache = new FileCache(db)
+  beforeAll(async () => {
+    const ctx = await createTestDatabase()
+    pool = ctx.pool
+    dbName = ctx.dbName
+  }, 30_000)
+
+  afterAll(async () => {
+    await dropTestDatabase(pool, dbName)
+  })
+
+  beforeEach(async () => {
+    await pool.query('TRUNCATE TABLE files')
+    cache = new FileCache(pool)
   })
 
   it('skips unchanged file on second parse (mtime + size match)', async () => {
@@ -51,7 +63,6 @@ describe('FileCache + parser', () => {
     const first = await parseClaudeFile(file, PRICING, cache)
     expect(first).toHaveLength(2)
 
-    // Second call with no file change — must short-circuit.
     const second = await parseClaudeFile(file, PRICING, cache)
     expect(second).toHaveLength(0)
   })
@@ -64,11 +75,9 @@ describe('FileCache + parser', () => {
     const first = await parseClaudeFile(file, PRICING, cache)
     expect(first).toHaveLength(1)
 
-    // Touch mtime by appending two new rows.
     await appendFile(file, [row('m2', '2026-05-05T12:01:00Z', 200), row('m3', '2026-05-05T12:02:00Z', 300)].join('\n') + '\n')
 
     const second = await parseClaudeFile(file, PRICING, cache)
-    // Only the new rows should be parsed.
     expect(second.map((e) => e.messageId).sort()).toEqual(['m2', 'm3'])
   })
 
@@ -86,7 +95,6 @@ describe('FileCache + parser', () => {
     const first = await parseClaude({ pricing: PRICING, claudeHome: root, fileCache: cache })
     expect(first).toHaveLength(5)
     const second = await parseClaude({ pricing: PRICING, claudeHome: root, fileCache: cache })
-    // No file changed — every file should be skipped.
     expect(second).toHaveLength(0)
   })
 })
