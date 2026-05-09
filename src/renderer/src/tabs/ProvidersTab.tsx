@@ -24,7 +24,7 @@ export function ProvidersTab({ agg, providers, dashboardUrl }: {
         <button
           type="button"
           className="dashboard-link dashboard-link-block"
-          title={`Open the full web dashboard (${dashboardUrl})`}
+          title={`Open the web view (${dashboardUrl})`}
           onClick={() => void window.api.openDashboard()}
         >
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -33,7 +33,7 @@ export function ProvidersTab({ agg, providers, dashboardUrl }: {
             <path d="M21 3l-9 9" />
             <path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" />
           </svg>
-          Show full dashboard in browser
+          Details
         </button>
       )}
 
