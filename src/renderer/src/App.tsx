@@ -22,6 +22,7 @@ import { OverviewTab } from './tabs/OverviewTab'
 import { ProvidersTab } from './tabs/ProvidersTab'
 import { SessionsTab } from './tabs/SessionsTab'
 import { SettingsTab } from './tabs/SettingsTab'
+import { TeamTab } from './tabs/TeamTab'
 
 declare global {
   interface Window {
@@ -58,7 +59,7 @@ declare global {
   }
 }
 
-type TabId = 'overview' | 'providers' | 'sessions' | 'alerts' | 'settings'
+type TabId = 'overview' | 'providers' | 'sessions' | 'alerts' | 'team' | 'settings'
 const TABS: { id: TabId; label: string; icon: JSX.Element }[] = [
   {
     id: 'overview',
@@ -103,6 +104,19 @@ const TABS: { id: TabId; label: string; icon: JSX.Element }[] = [
     ),
   },
   {
+    id: 'team',
+    label: 'Team',
+    icon: (
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+           strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+        <circle cx="9" cy="7" r="4" />
+        <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+        <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+      </svg>
+    ),
+  },
+  {
     id: 'settings',
     label: 'Settings',
     icon: (
@@ -125,7 +139,7 @@ function loadInitialTab(): TabId {
     const v = localStorage.getItem(ACTIVE_TAB_KEY)
     if (
       v === 'overview' || v === 'providers' || v === 'sessions' ||
-      v === 'alerts' || v === 'settings'
+      v === 'alerts' || v === 'team' || v === 'settings'
     ) return v
   } catch {
     /* localStorage unavailable */
@@ -325,6 +339,11 @@ export function App(): JSX.Element {
         {mountedTabs.has('alerts') && (
           <div hidden={activeTab !== 'alerts'}>
             <AlertsTab />
+          </div>
+        )}
+        {mountedTabs.has('team') && (
+          <div hidden={activeTab !== 'team'}>
+            <TeamTab settings={settings} />
           </div>
         )}
         {mountedTabs.has('settings') && (
