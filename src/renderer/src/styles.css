@@ -689,6 +689,14 @@ body {
   color: rgba(99, 173, 255, 0.95);
   border-color: rgba(99, 173, 255, 0.24);
 }
+/* OAuth (free-tier identity, no paid plan tier — Gemini's Google
+   Account / Workspace login). Distinct from subscription so the user
+   doesn't read it as "I'm paying for something". */
+.plan-chip.plan-oauth {
+  background: rgba(184, 132, 255, 0.12);
+  color: rgba(206, 174, 255, 0.95);
+  border-color: rgba(184, 132, 255, 0.24);
+}
 .plan-chip.plan-none {
   color: rgba(var(--fg), 0.35);
 }

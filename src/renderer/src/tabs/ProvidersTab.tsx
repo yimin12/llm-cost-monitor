@@ -62,6 +62,7 @@ export function ProvidersTab({ agg, providers, dashboardUrl }: {
                   }
                 >
                   {p.plan.authMode === 'subscription' && `Plan: ${p.plan.planName ?? 'Subscription'}`}
+                  {p.plan.authMode === 'oauth' && (p.plan.planName ?? 'OAuth')}
                   {p.plan.authMode === 'apiKey' && 'API Calling'}
                   {p.plan.authMode === 'none' && 'no auth'}
                   {p.plan.authMode === 'unknown' && 'unknown'}

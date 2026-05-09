@@ -35,7 +35,8 @@ describe('detectGooglePlan', () => {
       JSON.stringify({ access_token: 'a', id_token: idToken, refresh_token: 'r' }),
     )
     const plan = await detectGooglePlan({ geminiHome: dir, env: {} })
-    expect(plan.authMode).toBe('subscription')
+    // OAuth — Gemini CLI's free tier login, NOT a paid subscription.
+    expect(plan.authMode).toBe('oauth')
     expect(plan.planName).toBe('Google Account')
     expect(plan.detail).toBe('g@example.com')
   })
@@ -57,7 +58,7 @@ describe('detectGooglePlan', () => {
       JSON.stringify({ active: 'fallback@example.com' }),
     )
     const plan = await detectGooglePlan({ geminiHome: dir, env: {} })
-    expect(plan.authMode).toBe('subscription')
+    expect(plan.authMode).toBe('oauth')
     expect(plan.detail).toBe('fallback@example.com')
   })
 
