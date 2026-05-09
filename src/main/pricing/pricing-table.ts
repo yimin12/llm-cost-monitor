@@ -32,6 +32,15 @@ const FALLBACK: ModelPrice = {
 
 // Keys we keep from each LiteLLM entry. Same set as the Swift port.
 const PROVIDER_PREFIXES = ['anthropic/', 'openai/', 'google/', 'vertex_ai/', 'bedrock/']
+const LOCAL_PROVIDERS = new Set(['local', 'ollama', 'lmstudio', 'lm_studio', 'llama_cpp', 'llamacpp'])
+const SUPPLEMENTAL_PREFIXES = [
+  'anthropic.',
+  'global.anthropic.',
+  'us.anthropic.',
+  'eu.anthropic.',
+  'au.anthropic.',
+  ...PROVIDER_PREFIXES,
+]
 const KEYWORDS = [
   'opus',
   'sonnet',
@@ -108,6 +117,20 @@ function tokensTimesPerMillion(tokens: number, perMillion: number): bigint {
   return BigInt(Math.round(tokens * perMillion))
 }
 
+function mergeMissingPrice(base: ModelPrice, supplement: ModelPrice): ModelPrice {
+  return {
+    inputPerM: base.inputPerM,
+    outputPerM: base.outputPerM,
+    cacheReadPerM: base.cacheReadPerM ?? supplement.cacheReadPerM,
+    cacheCreationPerM: base.cacheCreationPerM ?? supplement.cacheCreationPerM,
+    cacheCreation5mPerM: base.cacheCreation5mPerM ?? supplement.cacheCreation5mPerM,
+    cacheCreation1hPerM: base.cacheCreation1hPerM ?? supplement.cacheCreation1hPerM,
+    reasoningPerM: base.reasoningPerM ?? supplement.reasoningPerM,
+    contextWindow: base.contextWindow ?? supplement.contextWindow,
+    provider: base.provider ?? supplement.provider,
+  }
+}
+
 export class PricingTable {
   readonly snapshotVersion: string
   private readonly entries: Map<string, ModelPrice>
@@ -146,7 +169,7 @@ export class PricingTable {
     const lowered = model.toLowerCase()
 
     const direct = this.entries.get(lowered)
-    if (direct !== undefined) return direct
+    if (direct !== undefined) return this.withSupplementalAliases(lowered, direct)
 
     for (const prefix of PROVIDER_PREFIXES) {
       const hit = this.entries.get(prefix + lowered)
@@ -167,6 +190,15 @@ export class PricingTable {
     return null
   }
 
+  private withSupplementalAliases(model: string, base: ModelPrice): ModelPrice {
+    let out = base
+    for (const prefix of SUPPLEMENTAL_PREFIXES) {
+      const supplement = this.entries.get(prefix + model)
+      if (supplement !== undefined) out = mergeMissingPrice(out, supplement)
+    }
+    return out
+  }
+
   contextWindow(model: string): number | null {
     return this.price(model)?.contextWindow ?? null
   }
@@ -175,6 +207,8 @@ export class PricingTable {
   // Falls back to Sonnet-equivalent pricing if the model is unknown — never
   // silently emits $0. Reasoning tokens reuse outputPerM when no dedicated rate.
   cost(event: UsageEvent): bigint {
+    if (LOCAL_PROVIDERS.has(event.provider.toLowerCase())) return 0n
+
     const p = this.price(event.model) ?? FALLBACK
 
     const cache5m = p.cacheCreation5mPerM ?? p.cacheCreationPerM ?? 0

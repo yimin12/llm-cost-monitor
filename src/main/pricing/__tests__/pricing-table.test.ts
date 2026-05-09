@@ -52,6 +52,19 @@ const synthetic = Buffer.from(
       output_cost_per_token: 0.00000125,
       litellm_provider: 'anthropic',
     },
+    'claude-sonnet-richer-alias': {
+      input_cost_per_token: 0.000003,
+      output_cost_per_token: 0.000015,
+      cache_creation_input_token_cost: 0.00000375,
+      litellm_provider: 'anthropic',
+    },
+    'anthropic.claude-sonnet-richer-alias': {
+      input_cost_per_token: 0.000003,
+      output_cost_per_token: 0.000015,
+      cache_creation_input_token_cost: 0.00000375,
+      cache_creation_input_token_cost_above_1hr: 0.000006,
+      litellm_provider: 'anthropic',
+    },
   }),
 )
 
@@ -59,7 +72,7 @@ describe('PricingTable (synthetic)', () => {
   const t = PricingTable.fromBuffer(synthetic)
 
   it('skips sample_spec and counts real models only', () => {
-    expect(t.modelCount).toBe(3)
+    expect(t.modelCount).toBe(5)
   })
 
   it('produces a stable, prefix-sized snapshotVersion', () => {
@@ -109,6 +122,15 @@ describe('PricingTable (synthetic)', () => {
     expect(t.cost(event)).toBe(3750n)
   })
 
+  it('cost math: exact model lookup supplements missing 1h cache rate from richer Anthropic alias', () => {
+    const event = makeEvent({
+      model: 'claude-sonnet-richer-alias',
+      cacheCreation1hTokens: 1000,
+    })
+    // 1000 × 6 = 6000 µUSD, not the 5m cache-creation fallback of 3750 µUSD.
+    expect(t.cost(event)).toBe(6000n)
+  })
+
   it('cost math: unknown model uses Sonnet-tier fallback (never silently $0)', () => {
     const event = makeEvent({
       model: 'totally-made-up-model-9001',
@@ -117,6 +139,17 @@ describe('PricingTable (synthetic)', () => {
     })
     // Fallback: input 3, output 15 → 1000*3 + 1000*15 = 18000 µUSD
     expect(t.cost(event)).toBe(18000n)
+  })
+
+  it('cost math: local provider keeps token usage but never charges money', () => {
+    const event = makeEvent({
+      provider: 'local',
+      model: 'ollama/llama3.1:8b',
+      inputTokens: 10_000,
+      outputTokens: 5_000,
+      reasoningTokens: 2_000,
+    })
+    expect(t.cost(event)).toBe(0n)
   })
 
   it('keyword fallback: "kimi-newer" hits no real entries but sonnet-keyword finds something', () => {
@@ -157,6 +190,25 @@ describe('PricingTable (bundled)', () => {
       outputTokens: 1000,
     })
     expect(t.cost(event)).toBeGreaterThan(0n)
+  })
+
+  it('uses Claude Sonnet 4.6 1h cache pricing from richer Anthropic alias', () => {
+    const event = makeEvent({
+      model: 'claude-sonnet-4-6',
+      cacheCreation1hTokens: 1000,
+    })
+    expect(t.cost(event)).toBe(6000n)
+  })
+
+  it('prices likely future hosted Chinese models as nonzero when present in bundled pricing', () => {
+    for (const model of ['kimi-k2.5', 'deepseek-v3.2', 'qwen3-coder-next', 'cerebras/zai-glm-4.7']) {
+      const event = makeEvent({
+        model,
+        inputTokens: 1000,
+        outputTokens: 1000,
+      })
+      expect(t.cost(event), model).toBeGreaterThan(0n)
+    }
   })
 
   it('unknown model still produces nonzero cost via fallback', () => {

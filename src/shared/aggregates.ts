@@ -55,4 +55,7 @@ export interface AggregateSnapshot {
   topModelsToday: CostByModel[]
   topProjectsToday: CostByProject[]
   forecast: MonthlyForecast | null
+  // Last 14 calendar days of cost in micro-USD, oldest → newest. Today is the
+  // last entry; days with no events are 0n. Drives the hero sparkline.
+  dailyCostMicroUsd: bigint[]
 }
