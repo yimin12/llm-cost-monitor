@@ -155,13 +155,13 @@ const seedAlerts: Alert[] = [
 
 export function installBrowserStub(): void {
   if (typeof window === 'undefined' || (window as unknown as { api?: unknown }).api) return
-
   // Browser-mode alerts state — mutable so the demo UI is interactive
   // (ack / resolve / snooze actually update the visible list).
   let alerts: Alert[] = [...seedAlerts]
   const subs = new Set<() => void>()
   const broadcast = (): void => { for (const s of subs) s() }
 
+  let cachedSettings: AppSettings = fakeSettings
   ;(window as unknown as { api: unknown }).api = {
     ping: async () => 'pong (browser-stub)',
     pricingInfo: async () => fakePricing,
@@ -169,8 +169,17 @@ export function installBrowserStub(): void {
     aggregates: async () => fakeSnapshot,
     providersList: async () => fakeProviders,
     providersRefresh: async () => fakeProviders.map((p) => ({ provider: p.id, error: null })),
-    settings: async () => fakeSettings,
+    settings: async () => cachedSettings,
+    setSettings: async (patch: Partial<AppSettings>) => {
+      cachedSettings = {
+        ...cachedSettings,
+        ...patch,
+        teamSync: { ...cachedSettings.teamSync, ...(patch.teamSync ?? {}) },
+      }
+      return cachedSettings
+    },
     onUsageUpdated: () => () => {},
+    onSettingsChanged: () => () => {},
 
     // Auth — browser-mode preview is always signed-out.
     authCurrent: async () => ({ kind: 'signed-out' }),
@@ -219,5 +228,25 @@ export function installBrowserStub(): void {
       subs.add(cb)
       return () => { subs.delete(cb) }
     },
+
+    // Team sync — browser-mode preview reports unconfigured.
+    syncStatus: async () => ({
+      configured: false,
+      enabled: false,
+      lastSyncAt: null,
+      pendingCount: 0,
+      lastError: null,
+      nodeId: 'demo-node-id',
+    }),
+    syncDrain: async () => ({
+      configured: false,
+      enabled: false,
+      lastSyncAt: Date.now(),
+      pendingCount: 0,
+      lastError: null,
+      nodeId: 'demo-node-id',
+    }),
+    syncTeamOverview: async () => null,
+    onSyncStatusChanged: () => () => {},
   }
 }

@@ -1,4 +1,4 @@
--- Schema v3 — local node identity + per-team sync cursor + audit log.
+-- Schema v4 — local node identity + per-team sync cursor + audit log.
 --
 -- Sync is opt-in. These tables exist on every install but stay empty
 -- until the user enables sync in Settings. Nothing here changes the
@@ -52,5 +52,5 @@ CREATE TABLE IF NOT EXISTS sync_audit (
 );
 CREATE INDEX IF NOT EXISTS sync_audit_occurred_at_idx ON sync_audit (occurred_at DESC);
 
-INSERT INTO schema_version (version) VALUES (3)
+INSERT INTO schema_version (version) VALUES (4)
 ON CONFLICT (version) DO NOTHING;

@@ -1,6 +1,8 @@
-// User-editable settings persisted to userData/settings.json. The file is
-// loaded once on app start; an edit UI does not exist yet, so handle this as
-// read-mostly. Schema bumps go through `schemaVersion`.
+// User-editable settings persisted to userData/settings.json. Loaded once
+// on app start and mutated through SettingsStore.set(). Schema bumps go
+// through `schemaVersion`.
+
+import { DEFAULT_TEAM_SYNC, type TeamSyncSettings } from './sync'
 
 export const SETTINGS_SCHEMA_VERSION = 2
 
@@ -34,6 +36,9 @@ export interface AppSettings {
   providers: Record<string, ProviderSettings>
   tray: { showCost: boolean }
   alerts: AlertSettings
+  // Cross-node sync configuration. Disabled by default; user opts in via UI.
+  // See plan.md Phase 5 + src/shared/sync.ts.
+  teamSync: TeamSyncSettings
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -61,4 +66,5 @@ export const DEFAULT_SETTINGS: AppSettings = {
     samplingIntervalMs: 30_000,
     notifications: true,
   },
+  teamSync: DEFAULT_TEAM_SYNC,
 }

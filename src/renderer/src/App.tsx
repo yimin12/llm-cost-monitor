@@ -10,6 +10,8 @@ import type {
   PricingInfo,
   ProviderListEntry,
   StorageInfo,
+  SyncStatus,
+  TeamOverview,
 } from '@shared/ipc-channels'
 
 import { AuthHeader } from './components/AuthHeader'
@@ -31,7 +33,9 @@ declare global {
       providersList: () => Promise<ProviderListEntry[]>
       providersRefresh: () => Promise<{ provider: string; error: string | null }[]>
       settings: () => Promise<AppSettings>
+      setSettings: (patch: Partial<AppSettings>) => Promise<AppSettings>
       onUsageUpdated: (cb: () => void) => () => void
+      onSettingsChanged: (cb: (s: AppSettings) => void) => () => void
       authCurrent: () => Promise<AuthState>
       authSignIn: () => Promise<AuthState>
       authSignOut: () => Promise<AuthState>
@@ -46,6 +50,10 @@ declare global {
       alertsSnooze: (id: string) => Promise<void>
       alertsResolveAll: () => Promise<number>
       onAlertsUpdated: (cb: () => void) => () => void
+      syncStatus: () => Promise<SyncStatus | null>
+      syncDrain: () => Promise<SyncStatus | null>
+      syncTeamOverview: () => Promise<TeamOverview | null>
+      onSyncStatusChanged: (cb: (s: SyncStatus | null) => void) => () => void
     }
   }
 }
