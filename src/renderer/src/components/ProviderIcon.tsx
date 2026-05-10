@@ -6,7 +6,17 @@
 // simple-icons doesn't ship OpenAI's logo (trademark concerns), so we
 // embed the canonical 24×24 rosette path directly.
 
-import { siClaude, siDeepseek, siGooglegemini, siMoonshotai } from 'simple-icons'
+import {
+  siAlibabacloud,
+  siBytedance,
+  siClaude,
+  siDeepseek,
+  siGooglegemini,
+  siHuggingface,
+  siMistralai,
+  siMoonshotai,
+  siX,
+} from 'simple-icons'
 
 interface BrandIcon {
   path: string
@@ -27,6 +37,17 @@ const ICONS: Record<string, BrandIcon> = {
   moonshotai: { path: siMoonshotai.path, hex: siMoonshotai.hex },
   // Trademarked: hand-embedded 24×24 path, brand hex.
   openai: { path: OPENAI_PATH, hex: '74AA9C' },
+  // xAI / Grok — Grok itself isn't in simple-icons so we use the
+  // parent xAI 𝕏 mark.
+  xai: { path: siX.path, hex: siX.hex },
+  // Doubao is owned by ByteDance; simple-icons ships the parent brand.
+  bytedance: { path: siBytedance.path, hex: siBytedance.hex },
+  doubao: { path: siBytedance.path, hex: siBytedance.hex },
+  // Alibaba covers Qwen (Alibaba Cloud's hosted family).
+  alibaba: { path: siAlibabacloud.path, hex: siAlibabacloud.hex },
+  // Mistral / Hugging Face — direct simple-icons coverage.
+  mistral: { path: siMistralai.path, hex: siMistralai.hex },
+  huggingface: { path: siHuggingface.path, hex: siHuggingface.hex },
 }
 
 export interface ProviderIconProps {

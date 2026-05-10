@@ -41,6 +41,12 @@ export class SettingsStore {
         ...this.cached.planOverrides,
         ...(patch.planOverrides ?? {}),
       },
+      // Same shallow-merge story as planOverrides: callers patch one
+      // provider's credential without dropping the others.
+      providerCredentials: {
+        ...this.cached.providerCredentials,
+        ...(patch.providerCredentials ?? {}),
+      },
       schemaVersion: SETTINGS_SCHEMA_VERSION,
     }
     this.persist(next)
@@ -109,6 +115,7 @@ function migrate(parsed: Partial<AppSettings>): AppSettings {
     alerts: { ...DEFAULT_SETTINGS.alerts, ...(parsed.alerts ?? {}) },
     teamSync: { ...DEFAULT_TEAM_SYNC, ...(parsed.teamSync ?? {}) },
     planOverrides: { ...(parsed.planOverrides ?? {}) },
+    providerCredentials: { ...(parsed.providerCredentials ?? {}) },
     schemaVersion: SETTINGS_SCHEMA_VERSION,
   }
   return base
