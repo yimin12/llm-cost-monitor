@@ -141,6 +141,24 @@ function clamp(n, lo, hi) {
   return Math.max(lo, Math.min(hi, n))
 }
 
+// Strip the "Claude " prefix from the display name — it's redundant in
+// a Claude-only statusline and eats horizontal space. Keep the rest
+// verbatim so version bumps surface ("Opus 4.7" → "Opus 4.8" etc).
+// Falls back to the raw model id when display_name is missing.
+function shortModelLabel(model) {
+  const display = typeof model?.display_name === 'string' ? model.display_name : null
+  const id = typeof model?.id === 'string' ? model.id : null
+  if (display !== null && display.length > 0) {
+    return display.replace(/^Claude\s+/i, '').trim()
+  }
+  if (id !== null && id.length > 0) {
+    // Best-effort: claude-opus-4-7 → "opus 4-7". Hyphens stay; we don't
+    // pretend to know which segment is the version vs the family.
+    return id.replace(/^claude-/i, '').replace(/\[1m\]$/i, '').trim()
+  }
+  return null
+}
+
 function main() {
   const stdin = readStdinSync()
   const session = safeJsonParse(stdin) ?? {}
@@ -162,10 +180,13 @@ function main() {
   }
 
   // Output. Single-line, no trailing newline (Claude Code adds one).
-  const parts = [
-    `💰 ${formatCost(cost)} today`,
-    `🧠 ${pctRemaining.toFixed(0)}% ctx`,
-  ]
+  // Model first so the answer to "which model am I talking to" is the
+  // first thing the eye catches; cost + context follow.
+  const modelLabel = shortModelLabel(session.model)
+  const parts = []
+  if (modelLabel !== null) parts.push(`🤖 ${modelLabel}`)
+  parts.push(`💰 ${formatCost(cost)} today`)
+  parts.push(`🧠 ${pctRemaining.toFixed(0)}% ctx`)
   process.stdout.write(parts.join(' · '))
 }
 
