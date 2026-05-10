@@ -224,7 +224,17 @@ export function App(): JSX.Element {
     void window.api.settings().then(setSettings)
     void window.api.dashboardUrl().then(setDashboardUrl)
     void reload()
-    return window.api.onUsageUpdated(scheduleReload)
+    // Subscribe to settings broadcasts so locale (and any other
+    // setting changed via the IPC) updates re-render immediately.
+    // Without this, calls like setSettings({locale:'zh-CN'}) round-
+    // trip through main, write settings.json, broadcast — but App's
+    // local copy stays stale and the LocaleProvider sees no change.
+    const offUsage = window.api.onUsageUpdated(scheduleReload)
+    const offSettings = window.api.onSettingsChanged(setSettings)
+    return () => {
+      offUsage()
+      offSettings()
+    }
   }, [reload, scheduleReload])
 
   // Alerts summary drives the tab badge — refreshed on every alerts:updated

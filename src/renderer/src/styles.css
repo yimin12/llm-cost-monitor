@@ -1809,10 +1809,15 @@ body {
 .lang-popover {
   position: absolute;
   right: 0;
-  bottom: calc(100% + 8px);
+  bottom: calc(100% + 6px);
   min-width: 180px;
-  background: rgba(28, 30, 38, 0.98);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  /* Match the footer band exactly: same composited shade so the
+     popover reads as "the footer expanded upward", not a separate
+     surface in a different shade. */
+  background:
+    linear-gradient(rgba(0, 0, 0, 0.35), rgba(0, 0, 0, 0.35)),
+    rgba(var(--bg-base), 0.985);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 10px;
   padding: 5px;
   display: flex;
