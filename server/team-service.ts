@@ -20,10 +20,21 @@ import type { Pool } from './db'
 // to inspect past activity). 'active' is the default after enrollment.
 export type MemberStatus = 'active' | 'revoked'
 
+// Role gates the management surface. 'admin' can add/remove members,
+// promote/demote, and change the privacy floor; 'member' is read-only.
+export type MemberRole = 'admin' | 'member'
+
 export interface MembershipRow {
   teamId: string
   userId: string
   status: MemberStatus
+  role: MemberRole
+}
+
+export interface TeamMeta {
+  teamId: string
+  name: string
+  privacyFloor: 'full' | 'redacted' | 'aggregateOnly'
 }
 
 // Errors the service raises for the HTTP layer to translate to status codes.
@@ -48,14 +59,49 @@ export class TeamService {
     )
   }
 
-  async addMember(teamId: string, userId: string, role = 'member'): Promise<void> {
-    await this.pool.query(
-      `INSERT INTO team_members (team_id, user_id, role, status, joined_at)
-       VALUES ($1, $2, $3, 'active', $4)
-       ON CONFLICT (team_id, user_id)
-       DO UPDATE SET status = 'active', removed_at = NULL`,
-      [teamId, userId, role, BigInt(Date.now())],
-    )
+  // Adds (or reactivates) a member. Auto-promotes the very first member
+  // of a team to admin so the bootstrapping user has the management
+  // surface — subsequent additions default to 'member' unless overridden.
+  // The auto-promote check runs *inside* the transaction so a race
+  // between two concurrent first inserts can't end up with zero admins.
+  async addMember(
+    teamId: string,
+    userId: string,
+    role?: MemberRole,
+    displayName?: string,
+  ): Promise<MemberRole> {
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+      // Lock teams row to serialize first-member elections per team.
+      await client.query(`SELECT id FROM teams WHERE id = $1 FOR UPDATE`, [teamId])
+      let effectiveRole: MemberRole = role ?? 'member'
+      if (role === undefined) {
+        const r = await client.query<{ count: string }>(
+          `SELECT COUNT(*)::text AS count FROM team_members WHERE team_id = $1 AND role = 'admin'`,
+          [teamId],
+        )
+        if (Number(r.rows[0]?.count ?? '0') === 0) {
+          effectiveRole = 'admin'
+        }
+      }
+      await client.query(
+        `INSERT INTO team_members (team_id, user_id, role, status, display_name, joined_at)
+         VALUES ($1, $2, $3, 'active', $4, $5)
+         ON CONFLICT (team_id, user_id)
+         DO UPDATE SET status = 'active',
+                       removed_at = NULL,
+                       display_name = COALESCE(EXCLUDED.display_name, team_members.display_name)`,
+        [teamId, userId, effectiveRole, displayName ?? null, BigInt(Date.now())],
+      )
+      await client.query('COMMIT')
+      return effectiveRole
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {})
+      throw err
+    } finally {
+      client.release()
+    }
   }
 
   async revokeMember(teamId: string, userId: string): Promise<void> {
@@ -66,13 +112,81 @@ export class TeamService {
     )
   }
 
+  // Change a member's role. Refuses to demote the last admin so a team
+  // can never end up unmanageable (caller gets 'invalid').
+  async setMemberRole(teamId: string, userId: string, role: MemberRole): Promise<void> {
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+      const cur = await client.query<{ role: MemberRole }>(
+        `SELECT role FROM team_members WHERE team_id = $1 AND user_id = $2 FOR UPDATE`,
+        [teamId, userId],
+      )
+      if (cur.rows.length === 0) {
+        throw new TeamServiceError('not_found', 'member not found')
+      }
+      if (cur.rows[0]!.role === 'admin' && role !== 'admin') {
+        const others = await client.query<{ count: string }>(
+          `SELECT COUNT(*)::text AS count
+             FROM team_members
+             WHERE team_id = $1 AND role = 'admin' AND user_id <> $2`,
+          [teamId, userId],
+        )
+        if (Number(others.rows[0]?.count ?? '0') === 0) {
+          throw new TeamServiceError('invalid', 'cannot demote the last admin')
+        }
+      }
+      await client.query(
+        `UPDATE team_members SET role = $1 WHERE team_id = $2 AND user_id = $3`,
+        [role, teamId, userId],
+      )
+      await client.query('COMMIT')
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {})
+      throw err
+    } finally {
+      client.release()
+    }
+  }
+
+  async setPrivacyFloor(teamId: string, level: 'full' | 'redacted' | 'aggregateOnly'): Promise<void> {
+    if (level !== 'full' && level !== 'redacted' && level !== 'aggregateOnly') {
+      throw new TeamServiceError('invalid', `invalid privacy level: ${level}`)
+    }
+    const r = await this.pool.query(
+      `UPDATE teams SET privacy_floor = $1 WHERE id = $2`,
+      [level, teamId],
+    )
+    if (r.rowCount === 0) {
+      throw new TeamServiceError('not_found', 'team not found')
+    }
+  }
+
+  async getTeamMeta(teamId: string): Promise<TeamMeta | null> {
+    const r = await this.pool.query<{
+      name: string
+      privacy_floor: 'full' | 'redacted' | 'aggregateOnly'
+    }>(`SELECT name, privacy_floor FROM teams WHERE id = $1`, [teamId])
+    if (r.rows.length === 0) return null
+    return {
+      teamId,
+      name: r.rows[0]!.name,
+      privacyFloor: r.rows[0]!.privacy_floor,
+    }
+  }
+
   async getMembership(teamId: string, userId: string): Promise<MembershipRow | null> {
-    const r = await this.pool.query<{ status: MemberStatus }>(
-      `SELECT status FROM team_members WHERE team_id = $1 AND user_id = $2`,
+    const r = await this.pool.query<{ status: MemberStatus; role: MemberRole }>(
+      `SELECT status, role FROM team_members WHERE team_id = $1 AND user_id = $2`,
       [teamId, userId],
     )
     if (r.rows.length === 0) return null
-    return { teamId, userId, status: r.rows[0]!.status }
+    return {
+      teamId,
+      userId,
+      status: r.rows[0]!.status,
+      role: r.rows[0]!.role,
+    }
   }
 
   // Idempotent batch upsert. Server enforces:
@@ -271,14 +385,29 @@ export class TeamService {
   }
 
   // Build the rollup payload for a team. Window defaults to last 30d.
-  async getOverview(teamId: string, windowMs = 30 * 24 * 3600_000): Promise<TeamOverview> {
+  // requestingUserId is used to surface that user's own role on the
+  // overview so the renderer can gate the management UI.
+  async getOverview(
+    teamId: string,
+    opts: { requestingUserId?: string; windowMs?: number } = {},
+  ): Promise<TeamOverview> {
+    const windowMs = opts.windowMs ?? 30 * 24 * 3600_000
     const now = Date.now()
     const since = now - windowMs
 
-    // Members + their event totals.
+    // Today window starts at the most recent UTC midnight. Cheap lower
+    // bound for the KPI 'cost today' card — pulse-style dashboard wants
+    // it without an extra round-trip.
+    const todayStart = new Date(now)
+    todayStart.setUTCHours(0, 0, 0, 0)
+    const todaySince = todayStart.getTime()
+
+    // Members + their event totals + role/status.
     const memberRows = await this.pool.query<{
       user_id: string
       display_name: string | null
+      role: MemberRole
+      status: MemberStatus
       cost: bigint
       event_count: bigint
       input_tokens: bigint
@@ -286,7 +415,9 @@ export class TeamService {
       last_seen_at: bigint | null
     }>(
       `SELECT m.user_id,
-              MAX(m.display_name) AS display_name,
+              m.display_name,
+              m.role,
+              m.status,
               COALESCE(SUM(e.cost_micro_usd), 0)::bigint AS cost,
               COUNT(e.sync_event_id)::bigint AS event_count,
               COALESCE(SUM(e.input_tokens), 0)::bigint AS input_tokens,
@@ -296,7 +427,7 @@ export class TeamService {
        LEFT JOIN usage_events e
          ON e.team_id = m.team_id AND e.user_id = m.user_id AND e.timestamp >= $2
        WHERE m.team_id = $1
-       GROUP BY m.user_id
+       GROUP BY m.user_id, m.display_name, m.role, m.status
        ORDER BY cost DESC`,
       [teamId, BigInt(since)],
     )
@@ -304,12 +435,19 @@ export class TeamService {
     const members: TeamMemberUsage[] = memberRows.rows.map((r) => ({
       userId: r.user_id,
       displayName: r.display_name,
+      role: r.role,
+      status: r.status,
       costMicroUsd: r.cost.toString(),
       eventCount: Number(r.event_count),
       inputTokens: Number(r.input_tokens),
       outputTokens: Number(r.output_tokens),
       lastSeenAt: r.last_seen_at === null ? null : Number(r.last_seen_at),
     }))
+
+    const currentUserRole: MemberRole | null =
+      opts.requestingUserId === undefined
+        ? null
+        : (members.find((m) => m.userId === opts.requestingUserId)?.role ?? null)
 
     // Top projects (using project_hash to group, since redacted is the
     // expected default; fall back to raw project name when available).
@@ -389,11 +527,35 @@ export class TeamService {
       [teamId, BigInt(since)],
     )
 
+    const todayRow = await this.pool.query<{ cost: bigint }>(
+      `SELECT COALESCE(SUM(cost_micro_usd), 0)::bigint AS cost
+       FROM usage_events WHERE team_id = $1 AND timestamp >= $2`,
+      [teamId, BigInt(todaySince)],
+    )
+
+    const teamMeta = await this.getTeamMeta(teamId)
+
+    // Active node = seen in the last 24h. Cheap, deterministic, and
+    // matches what the pulse-style "Active Sessions" card normally shows.
+    const activeWindow = now - 24 * 3600_000
+    const activeNodes = nodes.filter(
+      (n) => n.lastSeenAt !== null && n.lastSeenAt >= activeWindow,
+    ).length
+    const activeMembers = members.filter(
+      (m) => m.lastSeenAt !== null && m.lastSeenAt >= activeWindow,
+    ).length
+
     return {
       teamId,
+      teamName: teamMeta?.name ?? teamId,
       generatedAt: now,
+      currentUserRole,
+      privacyFloor: teamMeta?.privacyFloor ?? 'redacted',
       totalCostMicroUsd: (totalRow.rows[0]?.cost ?? 0n).toString(),
+      todayCostMicroUsd: (todayRow.rows[0]?.cost ?? 0n).toString(),
       totalEventCount: Number(totalRow.rows[0]?.event_count ?? 0n),
+      activeMembers,
+      activeNodes,
       members,
       topProjects,
       byProvider,

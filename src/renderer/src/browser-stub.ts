@@ -289,5 +289,9 @@ export function installBrowserStub(): void {
     }),
     syncTeamOverview: async () => null,
     onSyncStatusChanged: () => () => {},
+    teamAddMember: async () => ({ ok: false, status: 0, error: 'browser_stub' }),
+    teamRevokeMember: async () => ({ ok: false, status: 0, error: 'browser_stub' }),
+    teamSetMemberRole: async () => ({ ok: false, status: 0, error: 'browser_stub' }),
+    teamSetPrivacyFloor: async () => ({ ok: false, status: 0, error: 'browser_stub' }),
   }
 }

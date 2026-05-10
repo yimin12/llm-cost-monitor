@@ -8,6 +8,20 @@ import {
 } from '@shared/settings'
 import { DEFAULT_TEAM_SYNC, type TeamSyncSettings } from '@shared/sync'
 
+// Env-level default for the team-sync backend URL. Captured once at
+// process start so a respawn of `SettingsStore` (e.g. tests) sees the
+// same value the user launched with. The UI's persisted value still
+// wins when set; this is just the fallback that lets `LCM_SYNC_URL=…`
+// configure a private deploy without clicking through Settings.
+const ENV_SYNC_URL = readEnvSyncUrl()
+
+function readEnvSyncUrl(): string | null {
+  const raw = process.env['LCM_SYNC_URL']
+  if (raw === undefined) return null
+  const trimmed = raw.trim().replace(/\/+$/, '')
+  return trimmed.length > 0 ? trimmed : null
+}
+
 export class SettingsStore {
   private cached: AppSettings
   private listeners: Set<(s: AppSettings) => void> = new Set()
@@ -18,6 +32,15 @@ export class SettingsStore {
 
   get(): AppSettings {
     return this.cached
+  }
+
+  // Effective sync URL: persisted value wins when set, else falls back
+  // to LCM_SYNC_URL from the env. Returns null when neither is configured
+  // (sync is disabled).
+  effectiveSyncUrl(): string | null {
+    const persisted = this.cached.teamSync.serverUrl
+    if (persisted !== null && persisted.length > 0) return persisted
+    return ENV_SYNC_URL
   }
 
   // Atomic update: shallow-merge `patch` into the current settings, then

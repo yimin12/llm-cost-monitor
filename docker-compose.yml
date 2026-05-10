@@ -1,11 +1,21 @@
-# Dev-only Postgres for llm-cost-monitor + dockerized Prisma migration runner.
+# Portable backend stack for llm-cost-monitor:
+#   - postgres        : data store (always on)
+#   - migrate-desktop : one-shot Prisma migrator for the desktop schema  (profile: migrate)
+#   - migrate-server  : one-shot Prisma migrator for the server schema   (profile: migrate)
+#   - server          : the team-sync Core Service                       (profile: server)
 #
-# Bound to 127.0.0.1 only — no network exposure. Password is dev-only and
+# By default `docker compose up` brings up postgres only — the dev shape.
+# `docker compose --profile server up` adds the Core Service so any
+# machine can run the team-sync API portably (slice 4+7 of
+# .claude/worktrees/docker-portable-app-design/design.md).
+#
+# Bound to 127.0.0.1 only — no LAN exposure. Password is dev-only and
 # meaningless because the bind is loopback. Data lives in a named Docker
 # volume `lcm_pgdata` that survives `docker compose down`; only `db:reset`
 # (or `docker volume rm lcm_pgdata`) destroys it.
 #
-# Shipped builds do NOT use this — they keep SQLite. See docs/auth-plan.md §2.
+# Shipped Electron builds do NOT use this — they keep SQLite. See
+# docs/auth-plan.md §2 and docs/docker-portable.md.
 
 services:
   postgres:
@@ -75,6 +85,42 @@ services:
     # var host to `postgres` and add a `depends_on: { postgres: { condition: service_healthy } }`.
     extra_hosts:
       - "host.docker.internal:host-gateway"
+
+  # Team-sync Core Service. The desktop app posts redacted UsageEvents to
+  # this service over HTTPS (or http://localhost in single-machine
+  # deployments) — see src/main/sync/transport.ts.
+  #
+  # Run with:  docker compose --profile server up -d
+  # Or via:    npm run server:up
+  #
+  # Self-migrates on boot (server/index.ts → runServerMigrations) so this
+  # service does NOT depend on the migrate-server one-shot. Operators who
+  # want Prisma-managed migrations can still run `npm run db:migrate:server`
+  # ahead of bringing the server up; the in-process runner is idempotent.
+  server:
+    profiles: ["server"]
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    container_name: llm-cost-monitor-server
+    restart: unless-stopped
+    environment:
+      LCM_SERVER_DSN: postgres://lcm:lcm_dev@postgres:5432/lcm_team_sync
+      LCM_SERVER_PORT: "4017"
+      # 0.0.0.0 inside the container so the published port works. The
+      # host-side mapping below pins external access to loopback.
+      LCM_SERVER_BIND: "0.0.0.0"
+    ports:
+      - "127.0.0.1:4017:4017"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4017/healthz || exit 1"]
+      interval: 10s
+      timeout: 3s
+      start_period: 5s
+      retries: 5
 
 volumes:
   lcm_pgdata:

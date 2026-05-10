@@ -236,4 +236,93 @@ describe('TeamService.getOverview', () => {
     const ov = await svc.getOverview('team-A')
     expect(ov.nodes.map((n) => n.nodeId)).toContain('n-1')
   })
+
+  it('returns currentUserRole for the requesting user', async () => {
+    // user-1 was the first member added → auto-admin. user-2 → member.
+    const adminView = await svc.getOverview('team-A', { requestingUserId: 'user-1' })
+    expect(adminView.currentUserRole).toBe('admin')
+    const memberView = await svc.getOverview('team-A', { requestingUserId: 'user-2' })
+    expect(memberView.currentUserRole).toBe('member')
+    const guestView = await svc.getOverview('team-A', { requestingUserId: 'nobody' })
+    expect(guestView.currentUserRole).toBeNull()
+  })
+
+  it('exposes per-member role + status in the overview', async () => {
+    const ov = await svc.getOverview('team-A')
+    const u1 = ov.members.find((m) => m.userId === 'user-1')!
+    const u2 = ov.members.find((m) => m.userId === 'user-2')!
+    expect(u1.role).toBe('admin')
+    expect(u2.role).toBe('member')
+    expect(u1.status).toBe('active')
+  })
+})
+
+describe('TeamService.role management', () => {
+  let pool: Pool
+  let dbName: string
+  let svc: TeamService
+
+  beforeAll(async () => {
+    const created = await createServerTestDatabase()
+    pool = created.pool
+    dbName = created.dbName
+    svc = new TeamService(pool)
+  })
+
+  afterAll(async () => {
+    await dropServerTestDatabase(pool, dbName)
+  })
+
+  beforeEach(async () => {
+    await pool.query('DELETE FROM team_members')
+    await pool.query('DELETE FROM teams')
+    await svc.ensureTeam('team-X')
+  })
+
+  it('auto-promotes the first member to admin', async () => {
+    const role = await svc.addMember('team-X', 'first-user')
+    expect(role).toBe('admin')
+    const m = await svc.getMembership('team-X', 'first-user')
+    expect(m?.role).toBe('admin')
+  })
+
+  it('keeps later members at default role', async () => {
+    await svc.addMember('team-X', 'first-user')
+    const role = await svc.addMember('team-X', 'second-user')
+    expect(role).toBe('member')
+  })
+
+  it('honours explicit role override on addMember', async () => {
+    await svc.addMember('team-X', 'first-user') // becomes admin
+    const role = await svc.addMember('team-X', 'second-user', 'admin')
+    expect(role).toBe('admin')
+  })
+
+  it('setMemberRole flips role between admin and member', async () => {
+    await svc.addMember('team-X', 'first-user')
+    await svc.addMember('team-X', 'second-user')
+    await svc.setMemberRole('team-X', 'second-user', 'admin')
+    expect((await svc.getMembership('team-X', 'second-user'))?.role).toBe('admin')
+    await svc.setMemberRole('team-X', 'second-user', 'member')
+    expect((await svc.getMembership('team-X', 'second-user'))?.role).toBe('member')
+  })
+
+  it('refuses to demote the last admin', async () => {
+    await svc.addMember('team-X', 'only-admin')
+    await expect(svc.setMemberRole('team-X', 'only-admin', 'member')).rejects.toThrow(
+      /last admin/,
+    )
+  })
+
+  it('setPrivacyFloor updates teams.privacy_floor', async () => {
+    await svc.setPrivacyFloor('team-X', 'aggregateOnly')
+    const meta = await svc.getTeamMeta('team-X')
+    expect(meta?.privacyFloor).toBe('aggregateOnly')
+  })
+
+  it('setPrivacyFloor rejects invalid levels', async () => {
+    await expect(
+      svc.setPrivacyFloor('team-X', 'bogus' as 'full'),
+    ).rejects.toThrow(/invalid/)
+  })
 })
