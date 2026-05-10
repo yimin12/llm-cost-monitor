@@ -19,6 +19,7 @@ import { loadBundledPricing } from './pricing/load-bundled'
 import type { PricingTable } from './pricing/pricing-table'
 import { ProviderRegistry } from './providers/registry'
 import { SettingsStore } from './settings/store'
+import { StatuslineExporter } from './statusline-export'
 import { openPool, type Pool } from './storage/connect'
 import { EventRepository } from './storage/event-repository'
 import { FileCache } from './storage/file-cache'
@@ -224,6 +225,11 @@ void app.whenReady().then(async () => {
   providers = new ProviderRegistry({ pricing, events, fileCache })
   const settings = new SettingsStore(path.join(app.getPath('userData'), 'settings.json'))
 
+  // Exports today's spend to a JSON file the Claude Code statusline
+  // command (bin/devbar-statusline.js) reads. Re-flushed every refresh
+  // tick — see `runRefresh` below.
+  const statuslineExporter = new StatuslineExporter(app.getPath('userData'), aggregator)
+
   const authRepo = new AuthRepository(pool)
   const keychain = new KeychainStore()
   const auth = new AuthService({ repo: authRepo, keychain })
@@ -323,6 +329,10 @@ void app.whenReady().then(async () => {
             .join(', ')}; ${total} events stored`,
         )
         await updateTrayTitle()
+        // Best-effort write — statusline doesn't block the refresh path.
+        statuslineExporter.write().catch((err) => {
+          console.warn(`statusline export failed: ${(err as Error).message}`)
+        })
         broadcastUsageUpdated()
       } catch (err) {
         console.warn(`refresh ${label} failed: ${(err as Error).message}`)
