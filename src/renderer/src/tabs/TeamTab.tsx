@@ -14,6 +14,29 @@ function asBig(s: string): bigint {
   }
 }
 
+// Shared Team Details button. Lives outside the early-return ladder so
+// users can jump to the WebDashboard's Team Details section even when
+// sync is off (the dashboard explains how to configure it).
+function TeamDetailsButton({ dashboardUrl }: { dashboardUrl: string | null }): JSX.Element | null {
+  if (dashboardUrl === null) return null
+  return (
+    <button
+      type="button"
+      className="dashboard-link dashboard-link-block"
+      title={`Open the web view (${dashboardUrl})`}
+      onClick={() => void window.api.openDashboard()}
+    >
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M14 3h7v7" />
+        <path d="M21 3l-9 9" />
+        <path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" />
+      </svg>
+      Team Details
+    </button>
+  )
+}
+
 export function TeamTab({ settings, dashboardUrl }: {
   settings: AppSettings | null
   dashboardUrl: string | null
@@ -44,45 +67,57 @@ export function TeamTab({ settings, dashboardUrl }: {
 
   if (cfg === undefined || !cfg.enabled) {
     return (
-      <section className="empty-tab">
-        <h3>Team sync is off</h3>
-        <p>
-          Enable team sync in the Settings tab to upload a redacted projection
-          of your usage. Members of your team will then see consolidated
-          rollups here.
-        </p>
-      </section>
+      <>
+        <TeamDetailsButton dashboardUrl={dashboardUrl} />
+        <section className="empty-tab">
+          <h3>Team sync is off</h3>
+          <p>
+            Enable team sync in the Settings tab to upload a redacted projection
+            of your usage. Members of your team will then see consolidated
+            rollups here.
+          </p>
+        </section>
+      </>
     )
   }
 
   if (cfg.teamId === null || cfg.userId === null || cfg.serverUrl === null) {
     return (
-      <section className="empty-tab">
-        <h3>Configure team sync first</h3>
-        <p>Add a server URL, team ID, and user ID in Settings → Team Sync.</p>
-      </section>
+      <>
+        <TeamDetailsButton dashboardUrl={dashboardUrl} />
+        <section className="empty-tab">
+          <h3>Configure team sync first</h3>
+          <p>Add a server URL, team ID, and user ID in Settings → Team Sync.</p>
+        </section>
+      </>
     )
   }
 
   if (loading && overview === null) {
     return (
-      <section className="empty-tab">
-        <p>loading team data…</p>
-      </section>
+      <>
+        <TeamDetailsButton dashboardUrl={dashboardUrl} />
+        <section className="empty-tab">
+          <p>loading team data…</p>
+        </section>
+      </>
     )
   }
 
   if (overview === null) {
     return (
-      <section className="empty-tab">
-        <h3>No team data yet</h3>
-        <p>
-          {error ?? 'No events have been synced to this team yet, or the backend is offline.'}
-        </p>
-        <button type="button" className="refresh-btn" onClick={() => void reload()}>
-          retry
-        </button>
-      </section>
+      <>
+        <TeamDetailsButton dashboardUrl={dashboardUrl} />
+        <section className="empty-tab">
+          <h3>No team data yet</h3>
+          <p>
+            {error ?? 'No events have been synced to this team yet, or the backend is offline.'}
+          </p>
+          <button type="button" className="refresh-btn" onClick={() => void reload()}>
+            retry
+          </button>
+        </section>
+      </>
     )
   }
 
@@ -95,22 +130,7 @@ export function TeamTab({ settings, dashboardUrl }: {
         <span className="tab-context-sub">last 30d · {microToUsd(asBig(overview.totalCostMicroUsd))}</span>
       </section>
 
-      {dashboardUrl !== null && (
-        <button
-          type="button"
-          className="dashboard-link dashboard-link-block"
-          title={`Open the web view (${dashboardUrl})`}
-          onClick={() => void window.api.openDashboard()}
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-               strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <path d="M14 3h7v7" />
-            <path d="M21 3l-9 9" />
-            <path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" />
-          </svg>
-          Team Details
-        </button>
-      )}
+      <TeamDetailsButton dashboardUrl={dashboardUrl} />
 
       <section className="settings-card">
         <div className="settings-card-head">

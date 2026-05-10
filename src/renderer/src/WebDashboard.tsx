@@ -2,9 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { AggregateSnapshot } from '@shared/aggregates'
 import type {
+  AppSettings,
   PricingInfo,
   ProviderListEntry,
   StorageInfo,
+  TeamOverview,
 } from '@shared/ipc-channels'
 
 import { AreaChart, Donut, ShareBar, useAnimatedNumber } from './components/charts'
@@ -30,6 +32,17 @@ const PERIOD_LABEL: Record<Period, string> = {
   '6m': '6m',
   '1y': '1y',
 }
+// TeamOverview.cost fields arrive as strings from the server (bigint
+// preservation). Convert defensively so a malformed payload renders as 0
+// rather than crashing the page.
+function asBig(s: string): bigint {
+  try {
+    return BigInt(s)
+  } catch {
+    return 0n
+  }
+}
+
 function loadInitialPeriod(): Period {
   try {
     const v = localStorage.getItem(PERIOD_KEY)
@@ -46,19 +59,35 @@ export function WebDashboard(): JSX.Element {
   const [pricing, setPricing] = useState<PricingInfo | null>(null)
   const [storage, setStorage] = useState<StorageInfo | null>(null)
   const [providers, setProviders] = useState<ProviderListEntry[]>([])
+  const [settings, setSettings] = useState<AppSettings | null>(null)
+  const [teamOverview, setTeamOverview] = useState<TeamOverview | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [period, setPeriod] = useState<Period>(loadInitialPeriod)
   const [, forceTick] = useState(0)
 
   const reload = useCallback(async () => {
-    const [a, s, ps] = await Promise.all([
+    const [a, s, ps, st] = await Promise.all([
       window.api.aggregates(),
       window.api.storageInfo(),
       window.api.providersList(),
+      window.api.settings(),
     ])
     setAgg(a)
     setStorage(s)
     setProviders(ps)
+    setSettings(st)
+    // Team sync overview is best-effort: fetch if configured, swallow
+    // errors, leave the section hidden when null. Don't block the rest
+    // of the dashboard on a slow/unreachable team backend.
+    if (st.teamSync.enabled && st.teamSync.teamId !== null) {
+      try {
+        setTeamOverview(await window.api.syncTeamOverview())
+      } catch {
+        setTeamOverview(null)
+      }
+    } else {
+      setTeamOverview(null)
+    }
   }, [])
 
   const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -487,45 +516,197 @@ export function WebDashboard(): JSX.Element {
           )}
         </section>
 
-        {/* Sources */}
+        {/* Provider Details */}
         <section className="web-card">
           <header className="web-card-head">
             <div>
-              <h2>Sources</h2>
+              <h2>Provider Details</h2>
               <p>
                 {providers.filter((p) => p.isAvailable).length} of {providers.length} providers
                 detected on this machine.
               </p>
             </div>
           </header>
-          <ul className="web-sources-grid">
+          <ul className="web-providers-grid">
             {providers.map((p) => {
               const lastSeen = agg.providerLastSeen[p.id]
+              const today = agg.byProviderToday.find((r) => r.provider === p.id)
+              const last30d = agg.byProvider30d.find((r) => r.provider === p.id)
+              const override = settings?.planOverrides?.[p.id]?.trim()
+              const useOverride = override !== undefined && override.length > 0
+              const mode = useOverride ? 'subscription' : p.plan.authMode
+              const planLabel = useOverride
+                ? `Plan: ${override}`
+                : p.plan.authMode === 'subscription'
+                  ? `Plan: ${p.plan.planName ?? 'Subscription'}`
+                  : p.plan.authMode === 'oauth'
+                    ? (p.plan.planName ?? 'OAuth')
+                    : p.plan.authMode === 'apiKey'
+                      ? 'API Calling'
+                      : p.plan.authMode === 'none'
+                        ? 'no auth'
+                        : 'unknown'
               return (
-                <li key={p.id} className="web-source-card" data-available={p.isAvailable}>
-                  <span
-                    className="web-source-icon"
-                    style={{ background: providerColor(p.id) }}
-                    aria-hidden
-                  >
-                    {providerName(p.id).charAt(0)}
-                  </span>
-                  <div className="web-source-id">
-                    <span className="web-source-name">{p.name}</span>
-                    <span className="web-source-sub">
-                      {typeof lastSeen === 'number'
-                        ? `last seen ${timeAgo(lastSeen)} ago`
-                        : 'no events captured yet'}
+                <li key={p.id} className="web-provider-card" data-available={p.isAvailable}>
+                  <header className="web-provider-head">
+                    <span
+                      className="web-source-icon"
+                      style={{ background: providerColor(p.id) }}
+                      aria-hidden
+                    >
+                      {providerName(p.id).charAt(0)}
                     </span>
-                  </div>
-                  <span className="status-pill" data-state={p.isAvailable ? 'on' : 'off'}>
-                    {p.isAvailable ? 'detected' : 'no data'}
-                  </span>
+                    <div className="web-source-id">
+                      <span className="web-source-name">{p.name}</span>
+                      <span className="web-source-sub">
+                        {p.cliCommand !== null ? (
+                          <code className="web-cli-mono">{p.cliCommand}</code>
+                        ) : (
+                          providerName(p.id).toLowerCase()
+                        )}
+                      </span>
+                    </div>
+                    <span className={`plan-chip plan-${mode}`}>{planLabel}</span>
+                  </header>
+                  <dl className="web-provider-stats">
+                    <div>
+                      <dt>today</dt>
+                      <dd>{today ? microToUsd(today.costMicroUsd) : '—'}</dd>
+                      <dd className="web-provider-sub">{today?.eventCount ?? 0} calls</dd>
+                    </div>
+                    <div>
+                      <dt>30d</dt>
+                      <dd>{last30d ? microToUsd(last30d.costMicroUsd) : '—'}</dd>
+                      <dd className="web-provider-sub">{last30d?.eventCount ?? 0} calls</dd>
+                    </div>
+                    <div>
+                      <dt>last seen</dt>
+                      <dd className="web-provider-small">
+                        {typeof lastSeen === 'number' ? `${timeAgo(lastSeen)} ago` : '—'}
+                      </dd>
+                      <dd className="web-provider-sub">
+                        <span className="status-pill" data-state={p.isAvailable ? 'on' : 'off'}>
+                          {p.isAvailable ? 'detected' : 'no data'}
+                        </span>
+                      </dd>
+                    </div>
+                  </dl>
+                  {p.dashboardUrl !== null && (
+                    <a className="web-provider-link" href={p.dashboardUrl} target="_blank" rel="noreferrer">
+                      open provider dashboard ↗
+                    </a>
+                  )}
                 </li>
               )
             })}
           </ul>
         </section>
+
+        {/* Team Details — only rendered when sync is configured + reachable */}
+        {teamOverview !== null && (
+          <section className="web-card">
+            <header className="web-card-head">
+              <div>
+                <h2>Team Details</h2>
+                <p>
+                  team <strong>{teamOverview.teamId}</strong> ·{' '}
+                  {teamOverview.members.length} members ·{' '}
+                  {teamOverview.totalEventCount} events ·{' '}
+                  last 30d <strong>{microToUsd(asBig(teamOverview.totalCostMicroUsd))}</strong>
+                </p>
+              </div>
+            </header>
+
+            <div className="web-team-grid">
+              <div className="web-team-block">
+                <h3>Members</h3>
+                <ul className="web-team-rows">
+                  {teamOverview.members.map((m) => (
+                    <li key={m.userId}>
+                      <span className="web-team-label" title={m.userId}>
+                        {m.displayName ?? m.userId}
+                      </span>
+                      <span className="web-team-cost">
+                        {microToUsd(asBig(m.costMicroUsd))}
+                      </span>
+                      <span className="web-team-count">{m.eventCount}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <div className="web-team-block">
+                <h3>Top projects (30d)</h3>
+                {teamOverview.topProjects.length === 0 ? (
+                  <p className="web-empty">no project activity</p>
+                ) : (
+                  <ul className="web-team-rows">
+                    {teamOverview.topProjects.map((p) => (
+                      <li key={p.projectKey}>
+                        <span
+                          className="web-team-label"
+                          title={p.redacted ? 'project name redacted' : p.projectKey}
+                        >
+                          {p.redacted
+                            ? `${p.projectKey.slice(0, 8)}… (redacted)`
+                            : p.projectKey}
+                        </span>
+                        <span className="web-team-cost">
+                          {microToUsd(asBig(p.costMicroUsd))}
+                        </span>
+                        <span className="web-team-count">{p.eventCount}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <div className="web-team-block">
+                <h3>By provider · model</h3>
+                <ul className="web-team-rows">
+                  {teamOverview.byProvider.map((p) => (
+                    <li key={`${p.provider}|${p.model}`}>
+                      <span
+                        className="web-team-chip"
+                        style={{
+                          background: providerColor(p.provider),
+                          boxShadow: `0 0 6px ${providerColor(p.provider)}66`,
+                        }}
+                      />
+                      <span className="web-team-label" title={p.model}>
+                        {providerName(p.provider)} · {p.model}
+                      </span>
+                      <span className="web-team-cost">
+                        {microToUsd(asBig(p.costMicroUsd))}
+                      </span>
+                      <span className="web-team-count">{p.eventCount}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <div className="web-team-block">
+                <h3>Active nodes</h3>
+                <ul className="web-team-rows">
+                  {teamOverview.nodes.map((n) => (
+                    <li key={n.nodeId}>
+                      <span className="web-team-label" title={n.nodeId}>
+                        {n.displayName ?? `${n.nodeId.slice(0, 8)}…`}
+                        {n.platform !== null && (
+                          <span className="web-cli-mono"> · {n.platform}</span>
+                        )}
+                      </span>
+                      <span className="web-team-cost">{n.userId.slice(0, 12)}…</span>
+                      <span className="web-team-count">
+                        {n.lastSeenAt !== null ? `${timeAgo(n.lastSeenAt)} ago` : '—'}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </section>
+        )}
 
         <footer className="web-footer">
           <div>
