@@ -1743,10 +1743,14 @@ body {
   padding: 4px 12px;
   font-size: 10.5px;
   color: rgba(var(--fg), 0.7);
-  background: rgba(0, 0, 0, 0.35);
+  /* Fixed dark shade — same value used by .lang-popover below — so
+     the popover (which sits *over* the dashboard content, not over
+     this band) ends up the same visual colour. Composing the two
+     against different backdrops was making the popover look darker
+     than the footer. */
+  background: rgba(18, 20, 26, 0.96);
   /* Round only the bottom corners so the footer's bottom edge follows
-     the panel's rounded border. No top border — the colour shift from
-     the panel base is enough visual separation. */
+     the panel's rounded border. */
   border-radius: 0 0 16px 16px;
 }
 .tray-footer-version {
@@ -1811,21 +1815,17 @@ body {
   right: 0;
   bottom: calc(100% + 6px);
   min-width: 180px;
-  /* Match the footer band exactly: same composited shade so the
-     popover reads as "the footer expanded upward", not a separate
-     surface in a different shade. */
-  background:
-    linear-gradient(rgba(0, 0, 0, 0.35), rgba(0, 0, 0, 0.35)),
-    rgba(var(--bg-base), 0.985);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  /* Same fixed shade as .tray-footer above so the two always read as
+     one continuous dark surface, regardless of what content the
+     popover happens to be floating over. */
+  background: rgba(18, 20, 26, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 10px;
   padding: 5px;
   display: flex;
   flex-direction: column;
   gap: 1px;
-  box-shadow:
-    0 12px 32px rgba(0, 0, 0, 0.6),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
   z-index: 20;
 }
 .lang-option {
