@@ -69,15 +69,46 @@ function ProjectRows({ rows }: { rows: CostByProject[] }): JSX.Element {
   )
 }
 
-type Period = 'today' | '7d' | '30d'
+type Period = 'today' | '7d' | '1m' | '6m' | '1y'
+
+const PERIOD_RANGE: Record<Period, keyof Pick<
+  AggregateSnapshot,
+  'today' | 'last7d' | 'last30d' | 'last6m' | 'last1y'
+>> = {
+  today: 'today',
+  '7d': 'last7d',
+  '1m': 'last30d',
+  '6m': 'last6m',
+  '1y': 'last1y',
+}
+
+const PERIOD_BY_PROVIDER: Record<Exclude<Period, 'today'>, keyof Pick<
+  AggregateSnapshot,
+  'byProvider30d' | 'byProvider6m' | 'byProvider1y'
+>> = {
+  '7d': 'byProvider30d', // 7d view re-uses the 30d split — refining would
+                          // need a dedicated SQL window we haven't added.
+  '1m': 'byProvider30d',
+  '6m': 'byProvider6m',
+  '1y': 'byProvider1y',
+}
+
+const PERIOD_LABEL: Record<Period, string> = {
+  today: 'Today',
+  '7d': '7d',
+  '1m': '1m',
+  '6m': '6m',
+  '1y': '1y',
+}
 
 export function OverviewTab({ agg, period, onPeriodChange }: {
   agg: AggregateSnapshot
   period: Period
   onPeriodChange: (p: Period) => void
 }): JSX.Element {
-  const range = period === 'today' ? agg.today : period === '7d' ? agg.last7d : agg.last30d
-  const providerRows = period === 'today' ? agg.byProviderToday : agg.byProvider30d
+  const range = agg[PERIOD_RANGE[period]]
+  const providerRows =
+    period === 'today' ? agg.byProviderToday : agg[PERIOD_BY_PROVIDER[period]]
 
   const animatedDollar = useAnimatedNumber(Number(range.costMicroUsd) / 1_000_000)
   const animatedDollarText =
@@ -103,7 +134,7 @@ export function OverviewTab({ agg, period, onPeriodChange }: {
   return (
     <>
       <div className="period-bar" role="tablist">
-        {(['today', '7d', '30d'] as const).map((k) => (
+        {(['today', '7d', '1m', '6m', '1y'] as const).map((k) => (
           <button
             key={k}
             type="button"
@@ -112,14 +143,14 @@ export function OverviewTab({ agg, period, onPeriodChange }: {
             className={period === k ? 'period-tab active' : 'period-tab'}
             onClick={() => onPeriodChange(k)}
           >
-            {k === 'today' ? 'Today' : k}
+            {PERIOD_LABEL[k]}
           </button>
         ))}
       </div>
 
       <section className="hero">
         <div className="hero-left">
-          <span className="hero-label">{period === 'today' ? 'Today' : `Last ${period}`}</span>
+          <span className="hero-label">{period === 'today' ? 'Today' : `Last ${PERIOD_LABEL[period]}`}</span>
           <span className="hero-value">{animatedDollarText}</span>
           <div className="hero-meta">
             <span className="meta-pill">
@@ -204,7 +235,7 @@ export function OverviewTab({ agg, period, onPeriodChange }: {
 
       <section className="block">
         <div className="block-head">
-          <h3>By provider · {period}</h3>
+          <h3>By provider · {PERIOD_LABEL[period]}</h3>
         </div>
         <ProviderRows rows={providerRows} />
       </section>

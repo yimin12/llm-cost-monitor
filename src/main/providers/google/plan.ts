@@ -59,8 +59,12 @@ export async function detectGooglePlan(deps: GooglePlanDeps = {}): Promise<PlanI
       const accounts = await readJsonFile<GoogleAccounts>(join(geminiHome, 'google_accounts.json'))
       email = accounts?.active ?? null
     }
+    // Gemini CLI's OAuth login (`gemini auth login`) gives the user the
+    // free tier — there is no "plan" to display the way Claude Max or
+    // ChatGPT Plus does. We mark it as `oauth` so the renderer renders
+    // the identity label without a "Plan:" prefix.
     return {
-      authMode: 'subscription',
+      authMode: 'oauth',
       planName: hostedDomain !== null ? 'Workspace Account' : 'Google Account',
       source: credsPath,
       detail: email,

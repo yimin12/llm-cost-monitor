@@ -180,4 +180,36 @@ export class AuthService {
     this.setState({ kind: 'signed-out' })
     console.log('auth: signed out')
   }
+
+  // Returns a current Google access_token suitable for `Authorization:
+  // Bearer ...` to the team-sync backend, or null if the user isn't signed
+  // in. We refresh proactively if the cached token has < 60s of validity
+  // left so callers don't need to retry on 401.
+  async accessTokenForSync(): Promise<string | null> {
+    if (this.state.kind !== 'signed-in' || this.session === null) return null
+    const now = Date.now()
+    if (this.session.accessTokenExpiresAt - now > 60_000) {
+      return this.session.accessToken
+    }
+    if (this.secrets === null || this.session.refreshToken === null) return null
+    try {
+      const refreshed = await refreshGoogleAccessToken({
+        clientId: this.secrets.gcpClientId,
+        clientSecret: this.secrets.gcpClientSecret,
+        refreshToken: this.session.refreshToken,
+      })
+      this.session = {
+        user: refreshed.user ?? this.session.user,
+        refreshToken: refreshed.newRefreshToken ?? this.session.refreshToken,
+        accessToken: refreshed.accessToken,
+        accessTokenExpiresAt: refreshed.accessTokenExpiresAt,
+      }
+      if (refreshed.newRefreshToken !== null) {
+        await this.deps.keychain.writeRefreshToken(refreshed.newRefreshToken).catch(() => {})
+      }
+      return this.session.accessToken
+    } catch {
+      return null
+    }
+  }
 }

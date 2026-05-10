@@ -43,8 +43,9 @@ describe('AuthRepository (Postgres)', () => {
       'SELECT MAX(version) AS max FROM schema_version',
     )
     // Bump this when a new migration lands. Currently:
-    //   v1 = events/files/pricing_overrides, v2 = auth_user, v3 = alerts
-    expect(r.rows[0]?.max).toBe(3)
+    //   v1 = events/files/pricing_overrides, v2 = auth_user,
+    //   v3 = alerts, v4 = team-sync (local_node + sync_cursor + sync_audit)
+    expect(r.rows[0]?.max).toBe(4)
   })
 
   it('upsertActive + findActive round-trip', async () => {

@@ -25,28 +25,51 @@ body {
    Electron tray panel — see main.tsx for the renderer fork. */
 
 :root {
-  --bg-base: 16, 18, 24;
-  --fg: 245, 245, 247;
-  --fg-dim: 174, 174, 178;
-  --fg-mute: 124, 124, 128;
-  --accent: 99, 173, 255;
-  --accent2: 167, 139, 250;
-  --good: 48, 209, 88;
-  --warn: 255, 159, 10;
-  --danger: 255, 69, 58;
-  --hairline: rgba(255, 255, 255, 0.07);
-  --hairline-strong: rgba(255, 255, 255, 0.12);
-  --card: rgba(255, 255, 255, 0.035);
-  --card-hover: rgba(255, 255, 255, 0.06);
+  /* Higher-contrast palette. Background pulled darker, foregrounds pushed
+     brighter, accents made more saturated to match the menubar reference
+     screenshot. WCAG AA contrast against `--bg-base` for body text. */
+  --bg-base: 10, 12, 18;
+  --fg: 252, 252, 255;
+  --fg-dim: 200, 202, 210;
+  --fg-mute: 148, 150, 160;
+  --accent: 80, 192, 255;
+  --accent2: 184, 132, 255;
+  --good: 60, 230, 120;
+  --warn: 255, 176, 32;
+  --danger: 255, 80, 90;
+  --hairline: rgba(255, 255, 255, 0.10);
+  --hairline-strong: rgba(255, 255, 255, 0.18);
+  --card: rgba(255, 255, 255, 0.06);
+  --card-hover: rgba(255, 255, 255, 0.10);
 }
 
 /* ─────────── shell ─────────── */
+/* SCROLL PERFORMANCE NOTE
+ * The previous version of this rule had `backdrop-filter: blur(28px)
+ * saturate(160%)` directly on the scroll container. backdrop-filter forces
+ * Chromium to recomposite every frame as the contents scroll, which
+ * tanks scroll smoothness in Electron specifically (see
+ * github.com/electron/electron/issues/12906 + #2332).
+ *
+ * Mitigations applied here:
+ *   1. backdrop-filter removed from `.dropdown`. The aurora layer
+ *      already provides depth; the panel itself is now near-opaque so
+ *      we don't need the blurred-translucency trick.
+ *   2. The scroll container is promoted to its own GPU layer via
+ *      `transform: translateZ(0)` + `will-change: scroll-position`.
+ *   3. `overscroll-behavior: contain` stops scroll chains from bubbling
+ *      up to the host BrowserWindow and triggering rubber-band repaints.
+ *   4. `contain: layout paint` is applied to settings-card / provider-
+ *      card / loaded-tab containers below so each row's repaint stays
+ *      bounded to its own subtree instead of forcing a panel-wide
+ *      relayout per scroll tick.
+ */
 .dropdown {
   position: relative;
   isolation: isolate;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0)) ,
-    rgba(var(--bg-base), 0.94);
+    rgba(var(--bg-base), 0.985);
   border: 1px solid var(--hairline-strong);
   border-radius: 16px;
   color: rgb(var(--fg));
@@ -57,9 +80,15 @@ body {
   padding: 12px 14px 10px;
   width: 100%;
   overflow-y: auto;
+  overscroll-behavior: contain;
   font-size: 12px;
-  backdrop-filter: blur(28px) saturate(160%);
-  -webkit-backdrop-filter: blur(28px) saturate(160%);
+  /* Promote to its own compositor layer so scrolling doesn't repaint
+     the menubar's host window. translateZ(0) is the canonical incantation;
+     `will-change: scroll-position` tells Chromium specifically that
+     scrollTop is the property mutating, which lets it skip layout
+     recalc on each frame. */
+  transform: translateZ(0);
+  will-change: scroll-position;
   box-shadow:
     0 16px 48px rgba(0, 0, 0, 0.55),
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
@@ -131,20 +160,32 @@ body {
   min-width: 0;
 }
 .title-glyph {
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
   display: grid;
   place-items: center;
-  border-radius: 7px;
-  background: linear-gradient(135deg, #63adff, #a78bfa);
-  color: #0a0c12;
-  box-shadow: 0 2px 10px rgba(99, 173, 255, 0.4);
+  border-radius: 9px;
+  /* The SVG renders its own gradient now; the chip background is a darker
+     glow plate so the bright lightning bolt has something to pop off of. */
+  background:
+    radial-gradient(120% 120% at 30% 20%, rgba(99, 173, 255, 0.35), transparent 60%),
+    linear-gradient(135deg, rgba(99, 173, 255, 0.18), rgba(167, 139, 250, 0.18));
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow:
+    0 0 0 1px rgba(99, 173, 255, 0.18),
+    0 4px 16px rgba(99, 173, 255, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
 .title {
-  font-size: 13px;
-  font-weight: 650;
-  letter-spacing: -0.005em;
-  color: rgba(var(--fg), 0.95);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  /* Brand wordmark gets its own gradient text fill — picks up the same
+     palette as the glyph and matches the menubar reference's vibe. */
+  background: linear-gradient(135deg, #ffffff 0%, #e6ecff 60%, #c9b8ff 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 .live-pill {
   display: inline-flex;
@@ -674,6 +715,14 @@ body {
   color: rgba(99, 173, 255, 0.95);
   border-color: rgba(99, 173, 255, 0.24);
 }
+/* OAuth (free-tier identity, no paid plan tier — Gemini's Google
+   Account / Workspace login). Distinct from subscription so the user
+   doesn't read it as "I'm paying for something". */
+.plan-chip.plan-oauth {
+  background: rgba(184, 132, 255, 0.12);
+  color: rgba(206, 174, 255, 0.95);
+  border-color: rgba(184, 132, 255, 0.24);
+}
 .plan-chip.plan-none {
   color: rgba(var(--fg), 0.35);
 }
@@ -1169,6 +1218,9 @@ body {
   flex-direction: column;
   gap: 8px;
   transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+  /* Bound the card's layout/paint to its own subtree so scrolling the
+     dropdown doesn't trigger a panel-wide relayout for every card. */
+  contain: layout paint;
 }
 .provider-card:hover {
   background: var(--card-hover);
@@ -1308,6 +1360,8 @@ body {
   flex-direction: column;
   gap: 8px;
   transition: background 200ms ease, border-color 200ms ease;
+  /* Same scroll-isolation trick as `.provider-card`. */
+  contain: layout paint;
 }
 .settings-card:hover {
   background: var(--card-hover);
@@ -1383,3 +1437,108 @@ body {
   line-height: 1.5;
 }
 .about-card .about-line strong { color: rgba(var(--fg), 0.9); font-weight: 650; }
+
+/* ─────────── team-sync form ─────────── */
+.settings-hint {
+  font-size: 10.5px;
+  color: rgba(var(--fg), 0.55);
+  line-height: 1.45;
+  margin-bottom: 4px;
+}
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.form-row {
+  display: grid;
+  grid-template-columns: 84px 1fr;
+  align-items: center;
+  gap: 10px;
+}
+.form-row > span {
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(var(--fg), 0.6);
+  letter-spacing: 0.02em;
+}
+.form-row > input {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  color: rgba(var(--fg), 0.92);
+  font-size: 11px;
+  padding: 5px 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.form-row > input:focus {
+  outline: none;
+  border-color: rgba(99, 173, 255, 0.45);
+  background: rgba(255, 255, 255, 0.06);
+}
+.form-radio-group {
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.form-radio-group legend {
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(var(--fg), 0.55);
+  letter-spacing: 0.02em;
+}
+.form-radio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10.5px;
+  color: rgba(var(--fg), 0.78);
+  cursor: pointer;
+}
+.form-radio input { accent-color: #63adff; }
+.form-error { color: rgba(255, 99, 99, 0.95); font-size: 10.5px; font-weight: 500; }
+.toggle-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  user-select: none;
+}
+.toggle-pill input { accent-color: #63adff; transform: scale(0.95); }
+.mono.small { font-size: 10px; opacity: 0.7; }
+
+/* ─────────── empty-state for team tab ─────────── */
+.empty-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 16px 14px;
+  border: 1px dashed var(--hairline-strong);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.025);
+  color: rgba(var(--fg), 0.75);
+}
+.empty-tab h3 {
+  font-size: 12px;
+  font-weight: 650;
+  margin: 0;
+}
+.empty-tab p {
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgba(var(--fg), 0.6);
+}
+.team-member-row .row-label {
+  font-weight: 600;
+}

@@ -84,6 +84,127 @@ Five per-repo notes plus `research/SYNTHESIS.md` written to disk. See those for 
 - CSV export.
 - Windows support (mostly free with Electron once Linux works; needs Named-Pipe instead of Unix socket for hooks).
 
+### Phase 5 — Team / multi-node sync (future, opt-in)
+
+Goal: support teams and multiple machines without breaking the current local-first trust model. Every desktop node continues to parse local logs into normalized `UsageEvent` rows. A team-sync layer then uploads only the rows the user/org chooses to share.
+
+**Product goals**
+- Per-person usage: today / week / month cost and token totals by member.
+- Per-project usage across people and machines.
+- Per-provider and per-model team rollups, including Claude, Codex, Gemini, Kimi, DeepSeek, Qwen, hosted GLM, and local LLMs.
+- Local LLM usage contributes tokens but always contributes `$0` cost.
+- Admin controls for redaction, retention, export, and member offboarding.
+
+**Recommended architecture: hub-and-spoke sync**
+- Each app install is a **node** with a stable `nodeId`.
+- Each signed-in person has a stable `userId`.
+- Each team has a stable `teamId`.
+- The desktop app remains the source of truth for raw local parsing.
+- The cloud backend stores normalized, deduplicated, append-only usage events.
+- Aggregation happens in both places:
+  - Local SQLite for personal/offline UI.
+  - Team backend for team dashboards and shared reports.
+
+Avoid peer-to-peer sync for v1. P2P sounds attractive, but auth, NAT traversal, conflict handling, access control, and offboarding are much harder than a small central sync service.
+
+**Data model additions**
+
+Extend `UsageEvent` at sync time, not necessarily in the local parser shape:
+
+```ts
+interface SyncedUsageEvent extends UsageEvent {
+  teamId: string
+  userId: string
+  nodeId: string
+  eventVersion: 1
+  localEventId: string        // existing UsageEvent.id
+  syncEventId: string         // sha256(teamId|userId|nodeId|localEventId)
+  capturedAt: number
+  syncedAt: number | null
+  privacyLevel: 'full' | 'redacted' | 'aggregateOnly'
+}
+```
+
+Server tables:
+- `teams(id, name, created_at)`
+- `team_members(team_id, user_id, role, status, joined_at, removed_at)`
+- `nodes(id, user_id, team_id, name, platform, public_key, last_seen_at)`
+- `usage_events(sync_event_id primary key, team_id, user_id, node_id, local_event_id, provider, model, timestamp, project, token fields..., computed_cost_micro_usd, pricing_snapshot_version, source_hash, privacy_level, created_at)`
+- `sync_cursors(node_id, last_uploaded_at, last_acknowledged_event_timestamp)`
+- `pricing_snapshots(version, source, created_at)` for auditability.
+
+**Sync protocol**
+1. Node parses local logs and writes rows to local SQLite as it does today.
+2. Node marks unsynced rows with a local sync cursor, or derives unsynced rows by `timestamp > last_ack`.
+3. Node POSTs batches to `POST /v1/teams/:teamId/events:batchUpsert`.
+4. Server validates membership, dedupes by `syncEventId`, and stores rows append-only.
+5. Server returns accepted IDs and a new cursor.
+6. Node records the cursor locally.
+7. Team UI reads rollups from `GET /v1/teams/:teamId/usage?...`.
+
+Use idempotent batch upserts. A node can retry safely after network loss because `syncEventId` is deterministic.
+
+**Privacy levels**
+- `full`: upload provider, model, project, timestamps, token buckets, computed cost, source metadata hash.
+- `redacted`: upload provider/model/tokens/cost but project becomes a local hash or `(redacted)`.
+- `aggregateOnly`: upload pre-aggregated daily totals by provider/model, no event-level rows.
+
+Default should be `redacted` for team sync. Let admins require `aggregateOnly` for sensitive environments.
+
+**Conflict and dedup rules**
+- Local parser dedup remains provider-specific: Claude by message id, Codex by token-count event, Gemini by message/session id.
+- Server dedup is source-agnostic: `syncEventId = sha256(teamId|userId|nodeId|localEventId)`.
+- If the same event is re-uploaded with the same ID and same payload hash, server no-ops.
+- If same ID has a different payload hash, keep the latest row but write an audit record. This handles parser upgrades that change token bucketing.
+
+**Security**
+- Auth: OAuth sign-in for users; team membership enforced server-side.
+- Node enrollment: device code flow or signed desktop OAuth callback.
+- Transport: HTTPS only.
+- At rest: encrypt database volume; optionally encrypt sensitive project names per team.
+- Secrets: desktop keeps refresh tokens in OS keychain/safeStorage, never SQLite.
+- Offboarding: mark member removed, revoke refresh tokens, reject node uploads, optionally tombstone or anonymize historical rows according to team retention policy.
+
+**Backend choice**
+- v1 recommended: small hosted Postgres API.
+  - API: Node/Fastify, Hono, or Next.js route handlers.
+  - DB: Postgres with row-level team scoping.
+  - Jobs: nightly rollup materialization.
+- Avoid Firebase/Supabase lock-in until the schema stabilizes, unless speed matters more than portability.
+
+**Offline behavior**
+- Desktop app works fully offline.
+- Sync queue is best-effort and retrying.
+- Team dashboard shows `lastSeenAt` per node so admins know stale machines are missing data.
+- Never block local parsing or local UI on cloud availability.
+
+**Rollups**
+- Server should materialize daily rollups for speed:
+  - `team_daily_usage(team_id, date, provider, model, project_hash_or_name, user_id, input_tokens, output_tokens, cache_tokens, reasoning_tokens, cost_micro_usd, event_count)`
+- Rollups are derived data. Raw synced events remain the audit source unless the team chooses `aggregateOnly`.
+
+**Implementation slices**
+1. Add local `nodes` and `sync_state` tables.
+2. Add `teamId/userId/nodeId` config and disabled-by-default sync settings UI.
+3. Define `SyncedUsageEvent` DTO and privacy redaction function.
+4. Build local sync queue: select unsynced events, batch, retry, cursor update.
+5. Build backend batch-upsert endpoint with deterministic dedup.
+6. Build team aggregate endpoints.
+7. Add team dashboard UI: per-member, per-project, per-provider, per-model.
+8. Add admin controls: privacy mode, retention, member revoke, export.
+9. Add migration path for parser/pricing changes: payload hash + audit table.
+10. Add E2E tests with two local nodes uploading duplicate and distinct events.
+
+**Acceptance tests**
+- Two nodes for the same user upload events; team totals equal the union, no duplicates.
+- Two users upload same project name; team project total combines correctly.
+- Local provider events upload token totals with `computed_cost_micro_usd = 0`.
+- Redacted mode never uploads raw project names or source file paths.
+- Aggregate-only mode uploads no event-level IDs besides daily aggregate IDs.
+- Offline node queues events, then syncs successfully after reconnect.
+- Removed member cannot upload new events.
+- Pricing snapshot version is preserved so old costs remain auditable.
+
 ## 5. Project layout (Electron)
 
 ```
