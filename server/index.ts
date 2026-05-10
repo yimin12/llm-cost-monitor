@@ -5,7 +5,13 @@ import { createApp, defaultAuthorize } from './http'
 import { TeamService } from './team-service'
 
 const PORT = Number(process.env['LCM_SERVER_PORT'] ?? 4_017)
-const MIGRATIONS_DIR = resolve(__dirname, '../server-migrations')
+// Default to loopback so `npm run server:dev` never exposes the API to
+// the LAN. Containerized deploys set LCM_SERVER_BIND=0.0.0.0; the
+// compose `ports:` mapping (`127.0.0.1:4017:4017` by default) is what
+// gates external access.
+const BIND = process.env['LCM_SERVER_BIND'] ?? '127.0.0.1'
+const MIGRATIONS_DIR =
+  process.env['LCM_SERVER_MIGRATIONS_DIR'] ?? resolve(__dirname, '../server-migrations')
 
 async function main(): Promise<void> {
   const pool = openPool()
@@ -22,8 +28,8 @@ async function main(): Promise<void> {
     log: (line) => console.log(`[server] ${line}`),
   })
 
-  app.listen(PORT, '127.0.0.1', () => {
-    console.log(`[server] listening on http://127.0.0.1:${PORT}`)
+  app.listen(PORT, BIND, () => {
+    console.log(`[server] listening on http://${BIND}:${PORT}`)
   })
 
   const shutdown = async (): Promise<void> => {

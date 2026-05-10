@@ -1,0 +1,51 @@
+# Portable build of the team-sync Core Service. The desktop app stays a
+# native Electron build per platform; THIS image is what private-deploy
+# operators (and the bundled `docker compose up server`) run.
+#
+# Server runtime needs only `pg` — `better-sqlite3` and other
+# desktop-side deps in package.json are not imported here, so we
+# install pg directly in the runtime stage to keep the image lean
+# and avoid building native modules we don't use.
+
+# ── Stage 1: compile TypeScript ───────────────────────────────────────
+FROM node:20-alpine AS build
+WORKDIR /app
+
+# Install full deps for tsc only. --ignore-scripts skips better-sqlite3's
+# postinstall (which would need build tools we don't want in the build
+# image either).
+COPY package.json package-lock.json ./
+RUN npm ci --ignore-scripts --no-audit --no-fund
+
+COPY tsconfig.json tsconfig.server.json ./
+COPY server ./server
+COPY src ./src
+RUN npx tsc -p tsconfig.server.json
+
+# ── Stage 2: tiny runtime image ───────────────────────────────────────
+FROM node:20-alpine AS runtime
+ENV NODE_ENV=production
+WORKDIR /app
+
+# wget is for the HEALTHCHECK probe. ca-certificates so outbound HTTPS
+# (future webhook fanout, OAuth jwks) works without extra config.
+RUN apk add --no-cache wget ca-certificates
+
+# Install only the server's runtime deps. Pinned to the version range
+# in the repo's package.json so prod matches dev.
+RUN echo '{"name":"lcm-server-runtime","private":true}' > package.json && \
+    npm install --omit=optional --no-audit --no-fund --no-package-lock pg@8.20.0
+
+# Compiled JS preserves the source layout (out-server/server/*.js,
+# out-server/src/...). `__dirname` at runtime is /app/out-server/server,
+# and server/index.ts resolves migrations relative to that.
+COPY --from=build /app/out-server ./out-server
+COPY server-migrations ./out-server/server-migrations
+
+USER node
+EXPOSE 4017
+
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=5 \
+  CMD wget -qO- "http://127.0.0.1:${LCM_SERVER_PORT:-4017}/healthz" || exit 1
+
+CMD ["node", "out-server/server/index.js"]

@@ -258,25 +258,22 @@ void app.whenReady().then(async () => {
   const cursors = new CursorRepository(pool)
   const eventsRepo = events
   const buildSyncQueue = (): SyncQueue | null => {
-    const cfg = settings.get().teamSync
-    if (cfg.serverUrl === null || cfg.serverUrl.length === 0) return null
+    const url = settings.effectiveSyncUrl()
+    if (url === null) return null
     return new SyncQueue({
       events: eventsRepo,
       cursors,
       nodes,
-      transport: new HttpSyncTransport({ baseUrl: cfg.serverUrl }),
+      transport: new HttpSyncTransport({ baseUrl: url }),
       getAccessToken: () => auth.accessTokenForSync(),
     })
   }
   let syncQueue: SyncQueue | null = buildSyncQueue()
-  // Rebuild on serverUrl change so the user can flip backends without
-  // restarting the app.
-  settings.subscribe((s) => {
-    if (s.teamSync.serverUrl === null) {
-      syncQueue = null
-    } else {
-      syncQueue = buildSyncQueue()
-    }
+  // Rebuild on settings change so flipping the persisted serverUrl
+  // (and thus the effective URL) takes effect without restarting.
+  // LCM_SYNC_URL changes still need a restart — env is process-scoped.
+  settings.subscribe(() => {
+    syncQueue = buildSyncQueue()
   })
 
   registerIpcHandlers({
@@ -289,7 +286,7 @@ void app.whenReady().then(async () => {
     alerts: alertRepo,
     syncQueue,
     fetchTeamOverview: async (teamId, token) => {
-      const baseUrl = settings.get().teamSync.serverUrl
+      const baseUrl = settings.effectiveSyncUrl()
       if (baseUrl === null) return null
       return fetchTeamOverview({ baseUrl, teamId, accessToken: token })
     },
