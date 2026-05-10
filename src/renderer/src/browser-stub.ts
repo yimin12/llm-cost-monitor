@@ -282,5 +282,9 @@ export function installBrowserStub(): void {
     teamRevokeMember: async () => ({ ok: false, status: 0, error: 'browser_stub' }),
     teamSetMemberRole: async () => ({ ok: false, status: 0, error: 'browser_stub' }),
     teamSetPrivacyFloor: async () => ({ ok: false, status: 0, error: 'browser_stub' }),
+    providerKeyList: async (ids: string[]) =>
+      ids.map((id) => ({ providerId: id, configured: false, encryptionAvailable: false, addedAt: null })),
+    providerKeySet: async () => ({ ok: false, error: 'browser_stub' }),
+    providerKeyDelete: async () => ({ ok: false, error: 'browser_stub' }),
   }
 }

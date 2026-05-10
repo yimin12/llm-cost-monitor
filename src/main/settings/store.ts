@@ -64,6 +64,10 @@ export class SettingsStore {
         ...this.cached.planOverrides,
         ...(patch.planOverrides ?? {}),
       },
+      providerApiKeys: {
+        ...this.cached.providerApiKeys,
+        ...(patch.providerApiKeys ?? {}),
+      },
       schemaVersion: SETTINGS_SCHEMA_VERSION,
     }
     this.persist(next)
@@ -132,6 +136,7 @@ function migrate(parsed: Partial<AppSettings>): AppSettings {
     alerts: { ...DEFAULT_SETTINGS.alerts, ...(parsed.alerts ?? {}) },
     teamSync: { ...DEFAULT_TEAM_SYNC, ...(parsed.teamSync ?? {}) },
     planOverrides: { ...(parsed.planOverrides ?? {}) },
+    providerApiKeys: { ...(parsed.providerApiKeys ?? {}) },
     schemaVersion: SETTINGS_SCHEMA_VERSION,
   }
   return base

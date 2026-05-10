@@ -553,8 +553,30 @@ export function WebDashboard(): JSX.Element {
           </ul>
         </section>
 
-        {/* Team Details — only rendered when sync is configured + reachable */}
-        {teamOverview !== null && (
+        {/* Team Details — always rendered. Empty state when sync is off
+            so users who clicked the tray "Team Details" button always
+            land on a meaningful surface, not the provider Sources card. */}
+        {teamOverview === null ? (
+          <section className="web-card">
+            <header className="web-card-head">
+              <div>
+                <h2>Team Details</h2>
+                <p>Team sync isn't configured on this device.</p>
+              </div>
+            </header>
+            <div className="web-team-empty">
+              <p>
+                Enable team sync in <strong>Settings → Team Sync</strong> on the tray
+                panel to upload a redacted projection of your usage. Members will then
+                see consolidated rollups (cost today / 30d / active nodes / projects)
+                and admins can manage roles + privacy floor here.
+              </p>
+              <p className="web-team-empty-sub">
+                The desktop app stays fully functional offline — team sync is opt-in.
+              </p>
+            </div>
+          </section>
+        ) : (
           <section className="web-card">
             <header className="web-card-head">
               <div>

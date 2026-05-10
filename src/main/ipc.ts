@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, safeStorage, shell } from 'electron'
 
 import {
   EVENT,
@@ -11,6 +11,8 @@ import {
   type AuthState,
   type ProviderListEntry,
   type ProviderRefreshResult,
+  type ProviderKeyResult,
+  type ProviderKeyStatus,
   type SyncStatus,
   type TeamManageResult,
   type TeamMemberRole,
@@ -178,6 +180,95 @@ export function registerIpcHandlers(deps: IpcDeps): void {
       const ctx = await requireTeam()
       if (!ctx.ok) return ctx.result
       return deps.teamSetPrivacyFloor(ctx.teamId, ctx.token, level)
+    },
+  )
+
+  // ─── Provider catalog: API key management ───────────────────────
+  // Keys are encrypted at rest via safeStorage. The renderer only ever
+  // sees a status object (configured: boolean) — plaintext never crosses
+  // the IPC bridge. Listing returns *all* known providers so the UI can
+  // render an entry per catalog row regardless of whether a key exists.
+  const buildKeyStatus = (
+    providerId: string,
+    settings: AppSettings,
+  ): ProviderKeyStatus => {
+    const entry = settings.providerApiKeys[providerId]
+    if (entry === undefined) {
+      return {
+        providerId,
+        configured: false,
+        encryptionAvailable: safeStorage.isEncryptionAvailable(),
+        addedAt: null,
+      }
+    }
+    return {
+      providerId,
+      configured: true,
+      encryptionAvailable: entry.encryptionAvailable,
+      addedAt: entry.addedAt,
+    }
+  }
+
+  ipcMain.handle(
+    IPC.PROVIDER_KEY_LIST,
+    (_e, providerIds: string[]): ProviderKeyStatus[] => {
+      const settings = deps.settings.get()
+      return providerIds.map((id) => buildKeyStatus(id, settings))
+    },
+  )
+
+  ipcMain.handle(
+    IPC.PROVIDER_KEY_SET,
+    (_e, providerId: string, plaintext: string): ProviderKeyResult => {
+      if (typeof providerId !== 'string' || providerId.trim().length === 0) {
+        return { ok: false, error: 'invalid', message: 'providerId required' }
+      }
+      if (typeof plaintext !== 'string' || plaintext.trim().length === 0) {
+        return { ok: false, error: 'invalid', message: 'api key required' }
+      }
+      const encryptionAvailable = safeStorage.isEncryptionAvailable()
+      let ciphertextB64: string
+      try {
+        if (encryptionAvailable) {
+          ciphertextB64 = safeStorage.encryptString(plaintext.trim()).toString('base64')
+        } else {
+          // safeStorage unavailable (some Linux desktops missing
+          // libsecret/kwallet). Store base64 of plaintext so the JSON
+          // shape is identical; warn the renderer via encryptionAvailable.
+          ciphertextB64 = Buffer.from(plaintext.trim(), 'utf8').toString('base64')
+        }
+      } catch (err) {
+        return {
+          ok: false,
+          error: 'encrypt_failed',
+          message: (err as Error).message,
+        }
+      }
+      const next = deps.settings.set({
+        providerApiKeys: {
+          ...deps.settings.get().providerApiKeys,
+          [providerId]: {
+            ciphertextB64,
+            encryptionAvailable,
+            addedAt: Date.now(),
+          },
+        },
+      })
+      return { ok: true, status: buildKeyStatus(providerId, next) }
+    },
+  )
+
+  ipcMain.handle(
+    IPC.PROVIDER_KEY_DELETE,
+    (_e, providerId: string): ProviderKeyResult => {
+      const cur = deps.settings.get().providerApiKeys
+      if (cur[providerId] === undefined) {
+        return { ok: true, status: buildKeyStatus(providerId, deps.settings.get()) }
+      }
+      const next = { ...cur }
+      delete next[providerId]
+      const after = deps.settings.set({ providerApiKeys: next })
+      return { ok: true, status: buildKeyStatus(providerId, after) }
     },
   )
 

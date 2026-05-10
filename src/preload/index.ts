@@ -13,6 +13,8 @@ import {
   type ProviderListEntry,
   type ProviderRefreshResult,
   type StorageInfo,
+  type ProviderKeyResult,
+  type ProviderKeyStatus,
   type SyncStatus,
   type TeamManageResult,
   type TeamMemberRole,
@@ -98,6 +100,17 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke(IPC.TEAM_SET_MEMBER_ROLE, userId, role) as Promise<TeamManageResult>,
   teamSetPrivacyFloor: (level: PrivacyLevel): Promise<TeamManageResult> =>
     ipcRenderer.invoke(IPC.TEAM_SET_PRIVACY_FLOOR, level) as Promise<TeamManageResult>,
+
+  // Provider catalog API keys. Plaintext leaves the renderer once via
+  // providerKeySet — the main process encrypts it via safeStorage and
+  // never returns it back. List returns status only.
+  providerKeyList: (providerIds: string[]): Promise<ProviderKeyStatus[]> =>
+    ipcRenderer.invoke(IPC.PROVIDER_KEY_LIST, providerIds) as Promise<ProviderKeyStatus[]>,
+  providerKeySet: (providerId: string, plaintext: string): Promise<ProviderKeyResult> =>
+    ipcRenderer.invoke(IPC.PROVIDER_KEY_SET, providerId, plaintext) as Promise<ProviderKeyResult>,
+  providerKeyDelete: (providerId: string): Promise<ProviderKeyResult> =>
+    ipcRenderer.invoke(IPC.PROVIDER_KEY_DELETE, providerId) as Promise<ProviderKeyResult>,
+
   onSyncStatusChanged: (cb: (s: SyncStatus | null) => void): (() => void) => {
     const listener = (_e: unknown, s: SyncStatus | null): void => cb(s)
     ipcRenderer.on(EVENT.SYNC_STATUS_CHANGED, listener)

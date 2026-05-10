@@ -678,6 +678,17 @@ html.web #root {
   .web-team-kpis { grid-template-columns: repeat(2, 1fr); }
 }
 
+.web-team-empty {
+  padding: 18px 4px 6px;
+  color: rgba(245, 245, 247, 0.7);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.web-team-empty p { margin: 0 0 10px; }
+.web-team-empty p:last-child { margin: 0; }
+.web-team-empty strong { color: rgba(245, 245, 247, 0.92); font-weight: 650; }
+.web-team-empty-sub { color: rgba(245, 245, 247, 0.5); font-size: 12px; }
+
 /* ───── footer ───── */
 .web-footer {
   display: flex;

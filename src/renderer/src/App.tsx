@@ -8,6 +8,8 @@ import type {
   AppSettings,
   AuthState,
   PricingInfo,
+  ProviderKeyResult,
+  ProviderKeyStatus,
   ProviderListEntry,
   StorageInfo,
   SyncStatus,
@@ -67,6 +69,9 @@ declare global {
       teamRevokeMember: (userId: string) => Promise<TeamManageResult>
       teamSetMemberRole: (userId: string, role: TeamMemberRole) => Promise<TeamManageResult>
       teamSetPrivacyFloor: (level: PrivacyLevel) => Promise<TeamManageResult>
+      providerKeyList: (providerIds: string[]) => Promise<ProviderKeyStatus[]>
+      providerKeySet: (providerId: string, plaintext: string) => Promise<ProviderKeyResult>
+      providerKeyDelete: (providerId: string) => Promise<ProviderKeyResult>
     }
   }
 }
