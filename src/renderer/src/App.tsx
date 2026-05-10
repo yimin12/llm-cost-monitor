@@ -11,8 +11,11 @@ import type {
   ProviderListEntry,
   StorageInfo,
   SyncStatus,
+  TeamManageResult,
+  TeamMemberRole,
   TeamOverview,
 } from '@shared/ipc-channels'
+import type { PrivacyLevel } from '@shared/sync'
 
 import { AuthHeader } from './components/AuthHeader'
 import { PrivacyBanner } from './components/PrivacyBanner'
@@ -56,6 +59,14 @@ declare global {
       syncDrain: () => Promise<SyncStatus | null>
       syncTeamOverview: () => Promise<TeamOverview | null>
       onSyncStatusChanged: (cb: (s: SyncStatus | null) => void) => () => void
+      teamAddMember: (body: {
+        userId: string
+        displayName?: string
+        role?: TeamMemberRole
+      }) => Promise<TeamManageResult>
+      teamRevokeMember: (userId: string) => Promise<TeamManageResult>
+      teamSetMemberRole: (userId: string, role: TeamMemberRole) => Promise<TeamManageResult>
+      teamSetPrivacyFloor: (level: PrivacyLevel) => Promise<TeamManageResult>
     }
   }
 }

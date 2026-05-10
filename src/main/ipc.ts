@@ -12,9 +12,11 @@ import {
   type ProviderListEntry,
   type ProviderRefreshResult,
   type SyncStatus,
+  type TeamManageResult,
+  type TeamMemberRole,
   type TeamOverview,
 } from '@shared/ipc-channels'
-import type { TeamSyncSettings } from '@shared/sync'
+import type { PrivacyLevel, TeamSyncSettings } from '@shared/sync'
 
 import type { Aggregator } from './aggregation/aggregator'
 import type { AlertRepository } from './alerts/alert-repository'
@@ -37,6 +39,30 @@ export interface IpcDeps {
   // Fetches a TeamOverview from the backend. null when sync is disabled
   // or the backend is unreachable; renderer treats both the same.
   fetchTeamOverview: (teamId: string, accessToken: string | null) => Promise<TeamOverview | null>
+  // Admin-gated mutations against the team-sync server. Each handler is
+  // a thin wrapper that the main process owns so it can attach the
+  // bearer token + base URL without leaking either to the renderer.
+  teamAddMember: (
+    teamId: string,
+    accessToken: string | null,
+    body: { userId: string; displayName?: string; role?: TeamMemberRole },
+  ) => Promise<TeamManageResult>
+  teamRevokeMember: (
+    teamId: string,
+    accessToken: string | null,
+    userId: string,
+  ) => Promise<TeamManageResult>
+  teamSetMemberRole: (
+    teamId: string,
+    accessToken: string | null,
+    userId: string,
+    role: TeamMemberRole,
+  ) => Promise<TeamManageResult>
+  teamSetPrivacyFloor: (
+    teamId: string,
+    accessToken: string | null,
+    level: PrivacyLevel,
+  ) => Promise<TeamManageResult>
 }
 
 function teamSyncFromSettings(s: AppSettings): {
@@ -104,6 +130,56 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     const token = await deps.auth.accessTokenForSync().catch(() => null)
     return deps.fetchTeamOverview(cfg.teamId, token)
   })
+
+  // Helper: resolve teamId + bearer token, otherwise short-circuit to a
+  // structured error the renderer can show as a toast.
+  const requireTeam = async (): Promise<
+    | { ok: true; teamId: string; token: string | null }
+    | { ok: false; result: TeamManageResult }
+  > => {
+    const cfg = deps.settings.get().teamSync
+    if (!cfg.enabled || cfg.teamId === null) {
+      return {
+        ok: false,
+        result: { ok: false, status: 0, error: 'sync_off', message: 'team sync is off' },
+      }
+    }
+    const token = await deps.auth.accessTokenForSync().catch(() => null)
+    return { ok: true, teamId: cfg.teamId, token }
+  }
+
+  ipcMain.handle(
+    IPC.TEAM_ADD_MEMBER,
+    async (_e, body: { userId: string; displayName?: string; role?: TeamMemberRole }): Promise<TeamManageResult> => {
+      const ctx = await requireTeam()
+      if (!ctx.ok) return ctx.result
+      return deps.teamAddMember(ctx.teamId, ctx.token, body)
+    },
+  )
+  ipcMain.handle(
+    IPC.TEAM_REVOKE_MEMBER,
+    async (_e, userId: string): Promise<TeamManageResult> => {
+      const ctx = await requireTeam()
+      if (!ctx.ok) return ctx.result
+      return deps.teamRevokeMember(ctx.teamId, ctx.token, userId)
+    },
+  )
+  ipcMain.handle(
+    IPC.TEAM_SET_MEMBER_ROLE,
+    async (_e, userId: string, role: TeamMemberRole): Promise<TeamManageResult> => {
+      const ctx = await requireTeam()
+      if (!ctx.ok) return ctx.result
+      return deps.teamSetMemberRole(ctx.teamId, ctx.token, userId, role)
+    },
+  )
+  ipcMain.handle(
+    IPC.TEAM_SET_PRIVACY_FLOOR,
+    async (_e, level: PrivacyLevel): Promise<TeamManageResult> => {
+      const ctx = await requireTeam()
+      if (!ctx.ok) return ctx.result
+      return deps.teamSetPrivacyFloor(ctx.teamId, ctx.token, level)
+    },
+  )
 
   // Wire the AuthService → renderer broadcast.
   deps.auth.subscribe((state) => {

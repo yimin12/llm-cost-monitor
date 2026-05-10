@@ -14,8 +14,11 @@ import {
   type ProviderRefreshResult,
   type StorageInfo,
   type SyncStatus,
+  type TeamManageResult,
+  type TeamMemberRole,
   type TeamOverview,
 } from '@shared/ipc-channels'
+import type { PrivacyLevel } from '@shared/sync'
 
 contextBridge.exposeInMainWorld('api', {
   ping: (): Promise<string> => ipcRenderer.invoke(IPC.PING) as Promise<string>,
@@ -77,6 +80,24 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke(IPC.SYNC_DRAIN) as Promise<SyncStatus | null>,
   syncTeamOverview: (): Promise<TeamOverview | null> =>
     ipcRenderer.invoke(IPC.SYNC_TEAM_OVERVIEW) as Promise<TeamOverview | null>,
+
+  // Admin-only management. Each returns a TeamManageResult; the renderer
+  // toasts the error message when ok is false.
+  teamAddMember: (body: {
+    userId: string
+    displayName?: string
+    role?: TeamMemberRole
+  }): Promise<TeamManageResult> =>
+    ipcRenderer.invoke(IPC.TEAM_ADD_MEMBER, body) as Promise<TeamManageResult>,
+  teamRevokeMember: (userId: string): Promise<TeamManageResult> =>
+    ipcRenderer.invoke(IPC.TEAM_REVOKE_MEMBER, userId) as Promise<TeamManageResult>,
+  teamSetMemberRole: (
+    userId: string,
+    role: TeamMemberRole,
+  ): Promise<TeamManageResult> =>
+    ipcRenderer.invoke(IPC.TEAM_SET_MEMBER_ROLE, userId, role) as Promise<TeamManageResult>,
+  teamSetPrivacyFloor: (level: PrivacyLevel): Promise<TeamManageResult> =>
+    ipcRenderer.invoke(IPC.TEAM_SET_PRIVACY_FLOOR, level) as Promise<TeamManageResult>,
   onSyncStatusChanged: (cb: (s: SyncStatus | null) => void): (() => void) => {
     const listener = (_e: unknown, s: SyncStatus | null): void => cb(s)
     ipcRenderer.on(EVENT.SYNC_STATUS_CHANGED, listener)

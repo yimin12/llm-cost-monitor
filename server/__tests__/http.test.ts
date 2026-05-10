@@ -163,4 +163,69 @@ describe('HTTP server', () => {
     const r = await fetch(`${baseUrl}/v1/nope`)
     expect(r.status).toBe(404)
   })
+
+  it('admin endpoints require an admin caller', async () => {
+    // Add a non-admin user-2 first.
+    const svc = new TeamService(pool)
+    await svc.addMember('team-A', 'user-2')
+
+    // user-2 is a member, not admin → 403 on add-member.
+    const forbidden = await fetch(`${baseUrl}/v1/teams/team-A/members`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer user-2' },
+      body: JSON.stringify({ userId: 'user-3' }),
+    })
+    expect(forbidden.status).toBe(403)
+
+    // user-1 was first → admin → 200.
+    const ok = await fetch(`${baseUrl}/v1/teams/team-A/members`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer user-1' },
+      body: JSON.stringify({ userId: 'user-3' }),
+    })
+    expect(ok.status).toBe(200)
+    expect(await ok.json()).toEqual({ userId: 'user-3', role: 'member' })
+  })
+
+  it('admin can revoke a member; member cannot', async () => {
+    const svc = new TeamService(pool)
+    await svc.addMember('team-A', 'user-2')
+
+    const memberAttempt = await fetch(`${baseUrl}/v1/teams/team-A/members/user-1`, {
+      method: 'DELETE',
+      headers: { Authorization: 'Bearer user-2' },
+    })
+    expect(memberAttempt.status).toBe(403)
+
+    const adminAttempt = await fetch(`${baseUrl}/v1/teams/team-A/members/user-2`, {
+      method: 'DELETE',
+      headers: { Authorization: 'Bearer user-1' },
+    })
+    expect(adminAttempt.status).toBe(200)
+    const m = await svc.getMembership('team-A', 'user-2')
+    expect(m?.status).toBe('revoked')
+  })
+
+  it('admin can change privacy floor', async () => {
+    const r = await fetch(`${baseUrl}/v1/teams/team-A/privacy-floor`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer user-1' },
+      body: JSON.stringify({ level: 'aggregateOnly' }),
+    })
+    expect(r.status).toBe(200)
+    const meta = await new TeamService(pool).getTeamMeta('team-A')
+    expect(meta?.privacyFloor).toBe('aggregateOnly')
+  })
+
+  it('PATCH role refuses to demote the last admin', async () => {
+    const r = await fetch(`${baseUrl}/v1/teams/team-A/members/user-1`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer user-1' },
+      body: JSON.stringify({ role: 'member' }),
+    })
+    expect(r.status).toBe(400)
+    const body = (await r.json()) as { error: string; message?: string }
+    expect(body.error).toBe('invalid')
+    expect(body.message).toMatch(/last admin/)
+  })
 })

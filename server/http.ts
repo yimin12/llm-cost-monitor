@@ -105,11 +105,141 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: RouteCtx):
       return
     }
     try {
-      const overview = await ctx.service.getOverview(teamId)
+      const overview = await ctx.service.getOverview(teamId, {
+        requestingUserId: auth.userId,
+      })
       sendJson(res, 200, overview)
     } catch (err) {
       ctx.log(`getOverview error: ${(err as Error).message}`)
       sendJson(res, 500, { error: 'internal' })
+    }
+    return
+  }
+
+  // ─── admin management endpoints ──────────────────────────────────
+  // POST   /v1/teams/:teamId/members            — add or reactivate
+  // PATCH  /v1/teams/:teamId/members/:userId    — change role
+  // DELETE /v1/teams/:teamId/members/:userId    — revoke
+  // PATCH  /v1/teams/:teamId/privacy-floor      — set team-wide floor
+  // All require the requesting user to be an active 'admin' on teamId.
+
+  const requireAdmin = async (
+    teamId: string,
+  ): Promise<{ ok: true; userId: string } | { ok: false }> => {
+    const auth = ctx.authorize(req)
+    if (auth.userId === null) {
+      sendJson(res, 401, { error: 'unauthenticated' })
+      return { ok: false }
+    }
+    const m = await ctx.service.getMembership(teamId, auth.userId)
+    if (m === null || m.status !== 'active' || m.role !== 'admin') {
+      sendJson(res, 403, { error: 'forbidden' })
+      return { ok: false }
+    }
+    return { ok: true, userId: auth.userId }
+  }
+
+  const handleServiceError = (err: unknown, fallback: string): void => {
+    if (err instanceof TeamServiceError) {
+      const status =
+        err.code === 'forbidden' ? 403 : err.code === 'not_found' ? 404 : 400
+      sendJson(res, status, { error: err.code, message: err.message })
+      return
+    }
+    ctx.log(`${fallback}: ${(err as Error).message}`)
+    sendJson(res, 500, { error: 'internal' })
+  }
+
+  // POST /v1/teams/:teamId/members
+  const addMemberMatch = url.match(/^\/v1\/teams\/([^/]+)\/members(\?.*)?$/)
+  if (method === 'POST' && addMemberMatch !== null) {
+    const teamId = decodeURIComponent(addMemberMatch[1]!)
+    const ok = await requireAdmin(teamId)
+    if (!ok.ok) return
+    let body: { userId?: string; displayName?: string; role?: 'admin' | 'member' }
+    try {
+      body = await readJson(req)
+    } catch {
+      sendJson(res, 400, { error: 'invalid_json' })
+      return
+    }
+    if (typeof body.userId !== 'string' || body.userId.trim().length === 0) {
+      sendJson(res, 400, { error: 'invalid', message: 'userId required' })
+      return
+    }
+    if (body.role !== undefined && body.role !== 'admin' && body.role !== 'member') {
+      sendJson(res, 400, { error: 'invalid', message: 'role must be admin or member' })
+      return
+    }
+    try {
+      const role = await ctx.service.addMember(teamId, body.userId.trim(), body.role, body.displayName)
+      sendJson(res, 200, { userId: body.userId.trim(), role })
+    } catch (err) {
+      handleServiceError(err, 'addMember')
+    }
+    return
+  }
+
+  // PATCH /v1/teams/:teamId/members/:userId  — role change
+  // DELETE /v1/teams/:teamId/members/:userId — revoke
+  const memberMatch = url.match(/^\/v1\/teams\/([^/]+)\/members\/([^/?]+)(\?.*)?$/)
+  if (memberMatch !== null && (method === 'PATCH' || method === 'DELETE')) {
+    const teamId = decodeURIComponent(memberMatch[1]!)
+    const targetUserId = decodeURIComponent(memberMatch[2]!)
+    const ok = await requireAdmin(teamId)
+    if (!ok.ok) return
+    if (method === 'DELETE') {
+      try {
+        await ctx.service.revokeMember(teamId, targetUserId)
+        sendJson(res, 200, { userId: targetUserId, status: 'revoked' })
+      } catch (err) {
+        handleServiceError(err, 'revokeMember')
+      }
+      return
+    }
+    let body: { role?: 'admin' | 'member' }
+    try {
+      body = await readJson(req)
+    } catch {
+      sendJson(res, 400, { error: 'invalid_json' })
+      return
+    }
+    if (body.role !== 'admin' && body.role !== 'member') {
+      sendJson(res, 400, { error: 'invalid', message: 'role must be admin or member' })
+      return
+    }
+    try {
+      await ctx.service.setMemberRole(teamId, targetUserId, body.role)
+      sendJson(res, 200, { userId: targetUserId, role: body.role })
+    } catch (err) {
+      handleServiceError(err, 'setMemberRole')
+    }
+    return
+  }
+
+  // PATCH /v1/teams/:teamId/privacy-floor
+  const privacyMatch = url.match(/^\/v1\/teams\/([^/]+)\/privacy-floor(\?.*)?$/)
+  if (method === 'PATCH' && privacyMatch !== null) {
+    const teamId = decodeURIComponent(privacyMatch[1]!)
+    const ok = await requireAdmin(teamId)
+    if (!ok.ok) return
+    let body: { level?: 'full' | 'redacted' | 'aggregateOnly' }
+    try {
+      body = await readJson(req)
+    } catch {
+      sendJson(res, 400, { error: 'invalid_json' })
+      return
+    }
+    const level = body.level
+    if (level !== 'full' && level !== 'redacted' && level !== 'aggregateOnly') {
+      sendJson(res, 400, { error: 'invalid', message: 'invalid level' })
+      return
+    }
+    try {
+      await ctx.service.setPrivacyFloor(teamId, level)
+      sendJson(res, 200, { level })
+    } catch (err) {
+      handleServiceError(err, 'setPrivacyFloor')
     }
     return
   }

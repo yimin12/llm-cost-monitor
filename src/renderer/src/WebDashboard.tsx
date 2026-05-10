@@ -560,22 +560,52 @@ export function WebDashboard(): JSX.Element {
               <div>
                 <h2>Team Details</h2>
                 <p>
-                  team <strong>{teamOverview.teamId}</strong> ·{' '}
-                  {teamOverview.members.length} members ·{' '}
-                  {teamOverview.totalEventCount} events ·{' '}
-                  last 30d <strong>{microToUsd(asBig(teamOverview.totalCostMicroUsd))}</strong>
+                  <strong>{teamOverview.teamName}</strong>{' · '}
+                  role <strong>{teamOverview.currentUserRole ?? 'guest'}</strong>{' · '}
+                  privacy <strong>{teamOverview.privacyFloor}</strong>
                 </p>
               </div>
             </header>
 
+            <ul className="web-team-kpis">
+              <li>
+                <span className="web-team-kpi-label">cost today</span>
+                <span className="web-team-kpi-value">
+                  {microToUsd(asBig(teamOverview.todayCostMicroUsd))}
+                </span>
+              </li>
+              <li>
+                <span className="web-team-kpi-label">cost 30d</span>
+                <span className="web-team-kpi-value">
+                  {microToUsd(asBig(teamOverview.totalCostMicroUsd))}
+                </span>
+              </li>
+              <li>
+                <span className="web-team-kpi-label">active 24h</span>
+                <span className="web-team-kpi-value">
+                  {teamOverview.activeMembers}
+                  <span className="web-team-kpi-sub">/{teamOverview.members.length}</span>
+                </span>
+              </li>
+              <li>
+                <span className="web-team-kpi-label">active nodes</span>
+                <span className="web-team-kpi-value">
+                  {teamOverview.activeNodes}
+                  <span className="web-team-kpi-sub">/{teamOverview.nodes.length}</span>
+                </span>
+              </li>
+            </ul>
+
             <div className="web-team-grid">
               <div className="web-team-block">
-                <h3>Members</h3>
+                <h3>{teamOverview.currentUserRole === 'admin' ? 'Members · manage' : 'Collaborators'}</h3>
                 <ul className="web-team-rows">
                   {teamOverview.members.map((m) => (
-                    <li key={m.userId}>
+                    <li key={m.userId} data-status={m.status}>
                       <span className="web-team-label" title={m.userId}>
                         {m.displayName ?? m.userId}
+                        <span className={`web-team-role role-${m.role}`}> {m.role}</span>
+                        {m.status === 'revoked' && <span className="web-team-revoked"> revoked</span>}
                       </span>
                       <span className="web-team-cost">
                         {microToUsd(asBig(m.costMicroUsd))}

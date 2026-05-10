@@ -21,6 +21,12 @@ export const IPC = {
   SYNC_STATUS: 'sync:status',
   SYNC_DRAIN: 'sync:drain',
   SYNC_TEAM_OVERVIEW: 'sync:team-overview',
+  // Admin-only management calls. The handlers refuse unless the
+  // server-side TeamOverview reports the requesting user as an admin.
+  TEAM_ADD_MEMBER: 'team:add-member',
+  TEAM_REVOKE_MEMBER: 'team:revoke-member',
+  TEAM_SET_MEMBER_ROLE: 'team:set-member-role',
+  TEAM_SET_PRIVACY_FLOOR: 'team:set-privacy-floor',
   // Returns the dev-server URL that the same renderer is served at, or null
   // in production builds where the renderer is loaded via file://. The
   // renderer uses this to surface a "Open in browser" link from the tray.
@@ -72,9 +78,15 @@ export type { SyncStatus, TeamSyncSettings, PrivacyLevel } from './sync'
 
 // Server-side aggregates surfaced to the renderer's Team tab.
 // Computed by the backend; the desktop is purely a viewer.
+
+export type TeamMemberRole = 'admin' | 'member'
+export type TeamMemberStatus = 'active' | 'revoked'
+
 export interface TeamMemberUsage {
   userId: string
   displayName: string | null
+  role: TeamMemberRole
+  status: TeamMemberStatus
   costMicroUsd: string // bigint as string
   eventCount: number
   inputTokens: number
@@ -106,11 +118,26 @@ export interface TeamNodeStatus {
   lastSeenAt: number | null
 }
 
+// Tagged-union result for the admin management IPCs. The renderer uses
+// the `ok` boolean to render either a success toast or an error toast.
+export type TeamManageResult =
+  | { ok: true }
+  | { ok: false; status: number; error: string; message?: string }
+
 export interface TeamOverview {
   teamId: string
+  teamName: string
   generatedAt: number
+  // Role of the requesting user. null when the requester isn't (yet) a
+  // member — render the empty/onboard state, not the management UI.
+  currentUserRole: TeamMemberRole | null
+  // Mirrors PrivacyLevel; admins can change it via the management UI.
+  privacyFloor: 'full' | 'redacted' | 'aggregateOnly'
   totalCostMicroUsd: string
+  todayCostMicroUsd: string
   totalEventCount: number
+  activeMembers: number
+  activeNodes: number
   members: TeamMemberUsage[]
   topProjects: TeamProjectUsage[]
   byProvider: TeamProviderUsage[]

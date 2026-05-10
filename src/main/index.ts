@@ -28,7 +28,15 @@ import { CursorRepository } from './sync/cursor-repository'
 import { NodeIdentityRepository } from './sync/node-identity'
 import { SyncQueue } from './sync/sync-queue'
 import { HttpSyncTransport } from './sync/transport'
-import { fetchTeamOverview } from './sync/team-overview-client'
+import {
+  addTeamMember,
+  fetchTeamOverview,
+  revokeTeamMember,
+  setTeamMemberRole,
+  setTeamPrivacyFloor,
+  type ManageResult,
+} from './sync/team-overview-client'
+import type { TeamManageResult } from '@shared/ipc-channels'
 
 app.on('window-all-closed', () => {
   // Tray-only app — never quit on window close.
@@ -43,6 +51,25 @@ let providers: ProviderRegistry | null = null
 let aggregator: Aggregator | null = null
 let alerts: AlertRepository | null = null
 let baseTrayIcon: Electron.NativeImage | null = null
+
+// Bridge ManageResult<T> → TeamManageResult so the IPC layer can speak
+// a single tagged-union shape regardless of the call's success type.
+function manageToIpc<T>(r: ManageResult<T>): TeamManageResult {
+  if (r.ok) return { ok: true }
+  const result: TeamManageResult = {
+    ok: false,
+    status: r.status,
+    error: r.error,
+  }
+  if (r.message !== undefined) result.message = r.message
+  return result
+}
+
+// "Sync is off" short-circuit: no baseUrl resolves, so the call never
+// hits the network. Renderer surfaces it the same as a backend 0 error.
+function manageOff(): TeamManageResult {
+  return { ok: false, status: 0, error: 'sync_off', message: 'team sync is off' }
+}
 
 function getIconPath(): string {
   return path.join(
@@ -289,6 +316,34 @@ void app.whenReady().then(async () => {
       const baseUrl = settings.effectiveSyncUrl()
       if (baseUrl === null) return null
       return fetchTeamOverview({ baseUrl, teamId, accessToken: token })
+    },
+    teamAddMember: async (teamId, token, body) => {
+      const baseUrl = settings.effectiveSyncUrl()
+      if (baseUrl === null) return manageOff()
+      return manageToIpc(
+        await addTeamMember({ baseUrl, teamId, accessToken: token }, body),
+      )
+    },
+    teamRevokeMember: async (teamId, token, userId) => {
+      const baseUrl = settings.effectiveSyncUrl()
+      if (baseUrl === null) return manageOff()
+      return manageToIpc(
+        await revokeTeamMember({ baseUrl, teamId, accessToken: token }, userId),
+      )
+    },
+    teamSetMemberRole: async (teamId, token, userId, role) => {
+      const baseUrl = settings.effectiveSyncUrl()
+      if (baseUrl === null) return manageOff()
+      return manageToIpc(
+        await setTeamMemberRole({ baseUrl, teamId, accessToken: token }, userId, role),
+      )
+    },
+    teamSetPrivacyFloor: async (teamId, token, level) => {
+      const baseUrl = settings.effectiveSyncUrl()
+      if (baseUrl === null) return manageOff()
+      return manageToIpc(
+        await setTeamPrivacyFloor({ baseUrl, teamId, accessToken: token }, level),
+      )
     },
   })
 
