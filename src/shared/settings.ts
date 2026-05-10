@@ -30,6 +30,14 @@ export interface AlertSettings {
   notifications: boolean
 }
 
+export interface ProviderCredential {
+  apiKey: string
+  // Wall-clock at which the user last edited this credential. Used by
+  // the UI for "added Xm ago" labels and a future "rotate every N days"
+  // reminder.
+  updatedAt: number
+}
+
 export interface AppSettings {
   schemaVersion: number
   refreshIntervalMs: number
@@ -46,6 +54,15 @@ export interface AppSettings {
   // subscription state. Empty string / missing key = fall through to
   // the detected plan.
   planOverrides: Record<string, string>
+  // User-supplied credentials for providers devbar doesn't yet
+  // auto-detect (Grok, DeepSeek, Doubao, Kimi, etc. — see
+  // src/shared/provider-catalog.ts). Keyed by provider id.
+  //
+  // Storage caveat: today this lives in the same userData/settings.json
+  // as everything else. Production should migrate apiKey storage to the
+  // OS keychain via Electron `safeStorage` — flagged here as a known
+  // gap, fine for local dev.
+  providerCredentials: Record<string, ProviderCredential>
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -75,4 +92,5 @@ export const DEFAULT_SETTINGS: AppSettings = {
   },
   teamSync: DEFAULT_TEAM_SYNC,
   planOverrides: {},
+  providerCredentials: {},
 }
