@@ -186,7 +186,9 @@ function main() {
   const parts = []
   if (modelLabel !== null) parts.push(`🤖 ${modelLabel}`)
   parts.push(`💰 ${formatCost(cost)} today`)
-  parts.push(`🧠 ${pctRemaining.toFixed(0)}% ctx`)
+  // "left" disambiguates from "used" — the user can read this without
+  // having to remember which side of the ratio the percentage is on.
+  parts.push(`🧠 ${pctRemaining.toFixed(0)}% left`)
   process.stdout.write(parts.join(' · '))
 }
 
