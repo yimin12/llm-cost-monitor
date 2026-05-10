@@ -19,7 +19,6 @@ import type { PrivacyLevel } from '@shared/sync'
 
 import { AuthHeader } from './components/AuthHeader'
 import { Footer } from './components/Footer'
-import { PrivacyBanner } from './components/PrivacyBanner'
 import { LocaleProvider, useT } from './i18n/LocaleProvider'
 import { timeAgo } from './lib/format'
 import { useLenisScroll } from './lib/use-lenis-scroll'
@@ -405,8 +404,6 @@ export function App(): JSX.Element {
         )}
       </main>
       </div>
-
-      <PrivacyBanner />
 
       <Footer
         version={'0.0.1'}

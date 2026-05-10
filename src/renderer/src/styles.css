@@ -887,33 +887,10 @@ body {
   border-color: rgba(255, 255, 255, 0.2);
 }
 
-/* Privacy banner — pinned above the footer, *outside* the scroll
- * container so it always stays at the bottom of the panel and never
- * overlaps with scrolling content. Single-cohesive-block padding so
- * the two privacy lines flow as plain text rather than getting split
- * into a two-column flex layout (which previously produced "On-device
- * only." stranded on the left while the rest wrapped on the right).
- */
-.privacy {
-  flex: 0 0 auto;
-  font-size: 10px;
-  color: rgba(var(--fg), 0.55);
-  line-height: 1.45;
-  background: rgba(18, 20, 26, 0.96);
-  border-top: 1px solid rgba(48, 209, 88, 0.18);
-  padding: 7px 14px 8px;
-}
-.privacy-line {
-  display: block;
-  margin: 0;
-}
-.privacy-line + .privacy-line {
-  margin-top: 2px;
-}
-.privacy-line.subtle {
-  color: rgba(var(--fg), 0.4);
-  font-size: 9.5px;
-}
+/* (.privacy rules deleted — replaced by .privacy-badge in the footer
+ * meta row. The PrivacyBanner component itself is unmounted but kept
+ * in src/renderer/src/components/PrivacyBanner.tsx for now in case
+ * we ever want a verbose surface back.) */
 .privacy-line code {
   background: rgba(255, 255, 255, 0.06);
   border-radius: 4px;
@@ -1800,11 +1777,26 @@ body {
      the panel's rounded border. */
   border-radius: 0 0 16px 16px;
 }
+.tray-footer-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
 .tray-footer-version {
   font-family: 'SF Mono', ui-monospace, Menlo, Monaco, monospace;
   letter-spacing: 0.02em;
   color: rgba(var(--fg), 0.62);
 }
+.privacy-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: rgba(120, 200, 140, 0.85);
+  cursor: help;
+}
+.privacy-badge:hover { color: rgba(140, 220, 160, 1); }
 .tray-footer-actions {
   display: inline-flex;
   align-items: center;

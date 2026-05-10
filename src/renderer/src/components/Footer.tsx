@@ -1,12 +1,14 @@
 import { useT } from '../i18n/LocaleProvider'
 
 import { LanguagePicker } from './LanguagePicker'
+import { PrivacyBadge } from './PrivacyBadge'
 
 // Tray-panel footer. Mirrors the CLI-Pulse-style chrome row: app
-// version on the left, action icons on the right (refresh + language
-// + quit). The refresh icon is a duplicate of the header refresh —
-// the two surface the same affordance so users who scroll to the
-// bottom of a long tab don't have to scroll back up to trigger it.
+// version + privacy badge on the left, action icons on the right
+// (refresh + language + quit). The refresh icon is a duplicate of
+// the header refresh — the two surface the same affordance so users
+// who scroll to the bottom of a long tab don't have to scroll back
+// up to trigger it.
 
 export interface FooterProps {
   version: string
@@ -19,7 +21,10 @@ export function Footer({ version, refreshing, onRefresh, onQuit }: FooterProps):
   const { t } = useT()
   return (
     <footer className="tray-footer">
-      <span className="tray-footer-version">{t('footerVersion', { version })}</span>
+      <div className="tray-footer-meta">
+        <span className="tray-footer-version">{t('footerVersion', { version })}</span>
+        <PrivacyBadge />
+      </div>
       <div className="tray-footer-actions">
         <button
           type="button"
