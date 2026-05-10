@@ -43,6 +43,24 @@ const fakeSnapshot: AggregateSnapshot = {
     reasoningTokens: 151_000,
     eventCount: 312,
   },
+  last6m: {
+    costMicroUsd: usd(612.4),
+    inputTokens: 5_240_000,
+    outputTokens: 6_480_000,
+    cacheReadTokens: 1_240_000,
+    cacheCreationTokens: 410_000,
+    reasoningTokens: 820_000,
+    eventCount: 1_710,
+  },
+  last1y: {
+    costMicroUsd: usd(1_184.7),
+    inputTokens: 10_120_000,
+    outputTokens: 12_540_000,
+    cacheReadTokens: 2_410_000,
+    cacheCreationTokens: 790_000,
+    reasoningTokens: 1_580_000,
+    eventCount: 3_312,
+  },
   byProviderToday: [
     { provider: 'anthropic', costMicroUsd: usd(2.4), eventCount: 8 },
     { provider: 'openai', costMicroUsd: usd(1.2), eventCount: 3 },
@@ -53,6 +71,18 @@ const fakeSnapshot: AggregateSnapshot = {
     { provider: 'openai', costMicroUsd: usd(28.7), eventCount: 84 },
     { provider: 'google', costMicroUsd: usd(8.4), eventCount: 22 },
     { provider: 'deepseek', costMicroUsd: usd(3.1), eventCount: 8 },
+  ],
+  byProvider6m: [
+    { provider: 'anthropic', costMicroUsd: usd(394.2), eventCount: 1_086 },
+    { provider: 'openai', costMicroUsd: usd(155.6), eventCount: 462 },
+    { provider: 'google', costMicroUsd: usd(45.2), eventCount: 121 },
+    { provider: 'deepseek', costMicroUsd: usd(17.4), eventCount: 41 },
+  ],
+  byProvider1y: [
+    { provider: 'anthropic', costMicroUsd: usd(762.6), eventCount: 2_098 },
+    { provider: 'openai', costMicroUsd: usd(301.8), eventCount: 893 },
+    { provider: 'google', costMicroUsd: usd(87.5), eventCount: 234 },
+    { provider: 'deepseek', costMicroUsd: usd(32.8), eventCount: 87 },
   ],
   topModelsToday: [
     { provider: 'anthropic', model: 'claude-opus-4-7', costMicroUsd: usd(2.1), eventCount: 6 },
@@ -113,7 +143,7 @@ const fakeProviders: ProviderListEntry[] = [
   { id: 'openai', name: 'Codex CLI', isEnabled: true, isAvailable: true, cliCommand: 'codex', dashboardUrl: null,
     plan: { authMode: 'subscription', planName: 'Plus', source: '~/.codex/auth.json', detail: 'demo@example.com' } },
   { id: 'google', name: 'Gemini CLI', isEnabled: true, isAvailable: true, cliCommand: 'gemini', dashboardUrl: null,
-    plan: { authMode: 'subscription', planName: 'Google Account', source: '~/.gemini/oauth_creds.json', detail: 'demo@example.com' } },
+    plan: { authMode: 'oauth', planName: 'Google Account', source: '~/.gemini/oauth_creds.json', detail: 'demo@example.com' } },
   { id: 'deepseek', name: 'DeepSeek', isEnabled: false, isAvailable: false, cliCommand: null, dashboardUrl: null,
     plan: { authMode: 'apiKey', planName: 'API key', source: 'DEEPSEEK_API_KEY env', detail: null } },
   { id: 'moonshotai', name: 'Kimi', isEnabled: false, isAvailable: false, cliCommand: null, dashboardUrl: null,
@@ -124,8 +154,44 @@ const fakePricing: PricingInfo = { snapshotVersion: '246413ab150e (preview)', mo
 const fakeStorage: StorageInfo = { eventCount: 1018 }
 const fakeSettings: AppSettings = DEFAULT_SETTINGS
 
+// Alerts demo data — matches the patterns the AlertSampler raises in main.
+import type { Alert } from '@shared/alerts'
+const seedAlerts: Alert[] = [
+  {
+    id: 'a1', type: 'system.cpu', severity: 'warning',
+    title: 'Device CPU usage is elevated',
+    body: 'helper sampled CPU usage at 100%.',
+    raisedAt: Date.now() - 6 * 60_000,
+    status: 'open', ackedAt: null, resolvedAt: null, snoozedUntil: null,
+    signature: 'system.cpu', metadata: { cpuPct: 100 },
+  },
+  {
+    id: 'a2', type: 'cost.daily', severity: 'warning',
+    title: 'Daily LLM spend threshold reached',
+    body: "today's spend is $12.40, above your $10 threshold.",
+    raisedAt: Date.now() - 24 * 3600_000,
+    status: 'open', ackedAt: null, resolvedAt: null, snoozedUntil: null,
+    signature: 'cost.daily.demo', metadata: { todayUsd: 12.4 },
+  },
+  {
+    id: 'a3', type: 'system.memory', severity: 'critical',
+    title: 'Device memory is running low',
+    body: '420 MB free of 16.0 GB (97% used).',
+    raisedAt: Date.now() - 3 * 24 * 3600_000,
+    status: 'open', ackedAt: null, resolvedAt: null, snoozedUntil: null,
+    signature: 'system.memory', metadata: { memPct: 97 },
+  },
+]
+
 export function installBrowserStub(): void {
   if (typeof window === 'undefined' || (window as unknown as { api?: unknown }).api) return
+  // Browser-mode alerts state — mutable so the demo UI is interactive
+  // (ack / resolve / snooze actually update the visible list).
+  let alerts: Alert[] = [...seedAlerts]
+  const subs = new Set<() => void>()
+  const broadcast = (): void => { for (const s of subs) s() }
+
+  let cachedSettings: AppSettings = fakeSettings
   ;(window as unknown as { api: unknown }).api = {
     ping: async () => 'pong (browser-stub)',
     pricingInfo: async () => fakePricing,
@@ -133,7 +199,84 @@ export function installBrowserStub(): void {
     aggregates: async () => fakeSnapshot,
     providersList: async () => fakeProviders,
     providersRefresh: async () => fakeProviders.map((p) => ({ provider: p.id, error: null })),
-    settings: async () => fakeSettings,
+    settings: async () => cachedSettings,
+    setSettings: async (patch: Partial<AppSettings>) => {
+      cachedSettings = {
+        ...cachedSettings,
+        ...patch,
+        teamSync: { ...cachedSettings.teamSync, ...(patch.teamSync ?? {}) },
+      }
+      return cachedSettings
+    },
     onUsageUpdated: () => () => {},
+    onSettingsChanged: () => () => {},
+
+    // Auth — browser-mode preview is always signed-out.
+    authCurrent: async () => ({ kind: 'signed-out' }),
+    authSignIn: async () => ({ kind: 'signed-out' }),
+    authSignOut: async () => ({ kind: 'signed-out' }),
+    onAuthStateChanged: () => () => {},
+    appQuit: async () => {},
+    dashboardUrl: async () => null,
+    openDashboard: async () => {},
+
+    // Alerts — fully interactive against the in-memory demo list.
+    alertsList: async (filter: 'open' | 'resolved' | 'all') => {
+      if (filter === 'all') return alerts
+      if (filter === 'resolved') return alerts.filter((a) => a.status === 'resolved')
+      return alerts.filter((a) => a.status !== 'resolved')
+    },
+    alertsSummary: async () => {
+      const out = { open: 0, acked: 0, snoozed: 0, resolved: 0 }
+      for (const a of alerts) {
+        if (a.status in out) out[a.status as keyof typeof out]++
+      }
+      return out
+    },
+    alertsAck: async (id: string) => {
+      alerts = alerts.map((a) => a.id === id ? { ...a, status: 'acked', ackedAt: Date.now() } : a)
+      broadcast()
+    },
+    alertsResolve: async (id: string) => {
+      alerts = alerts.map((a) => a.id === id ? { ...a, status: 'resolved', resolvedAt: Date.now() } : a)
+      broadcast()
+    },
+    alertsSnooze: async (id: string) => {
+      alerts = alerts.map((a) => a.id === id
+        ? { ...a, status: 'snoozed', snoozedUntil: Date.now() + 60 * 60_000 }
+        : a)
+      broadcast()
+    },
+    alertsResolveAll: async () => {
+      const n = alerts.filter((a) => a.status !== 'resolved').length
+      alerts = alerts.map((a) => a.status === 'resolved' ? a
+        : { ...a, status: 'resolved', resolvedAt: Date.now() })
+      broadcast()
+      return n
+    },
+    onAlertsUpdated: (cb: () => void) => {
+      subs.add(cb)
+      return () => { subs.delete(cb) }
+    },
+
+    // Team sync — browser-mode preview reports unconfigured.
+    syncStatus: async () => ({
+      configured: false,
+      enabled: false,
+      lastSyncAt: null,
+      pendingCount: 0,
+      lastError: null,
+      nodeId: 'demo-node-id',
+    }),
+    syncDrain: async () => ({
+      configured: false,
+      enabled: false,
+      lastSyncAt: Date.now(),
+      pendingCount: 0,
+      lastError: null,
+      nodeId: 'demo-node-id',
+    }),
+    syncTeamOverview: async () => null,
+    onSyncStatusChanged: () => () => {},
   }
 }

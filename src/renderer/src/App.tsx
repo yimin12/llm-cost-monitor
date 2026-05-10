@@ -2,20 +2,28 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { AggregateSnapshot } from '@shared/aggregates'
 import type {
+  Alert,
+  AlertFilter,
+  AlertSummary,
   AppSettings,
   AuthState,
   PricingInfo,
   ProviderListEntry,
   StorageInfo,
+  SyncStatus,
+  TeamOverview,
 } from '@shared/ipc-channels'
 
 import { AuthHeader } from './components/AuthHeader'
 import { PrivacyBanner } from './components/PrivacyBanner'
 import { timeAgo } from './lib/format'
+import { useLenisScroll } from './lib/use-lenis-scroll'
+import { AlertsTab } from './tabs/AlertsTab'
 import { OverviewTab } from './tabs/OverviewTab'
 import { ProvidersTab } from './tabs/ProvidersTab'
 import { SessionsTab } from './tabs/SessionsTab'
 import { SettingsTab } from './tabs/SettingsTab'
+import { TeamTab } from './tabs/TeamTab'
 
 declare global {
   interface Window {
@@ -27,7 +35,9 @@ declare global {
       providersList: () => Promise<ProviderListEntry[]>
       providersRefresh: () => Promise<{ provider: string; error: string | null }[]>
       settings: () => Promise<AppSettings>
+      setSettings: (patch: Partial<AppSettings>) => Promise<AppSettings>
       onUsageUpdated: (cb: () => void) => () => void
+      onSettingsChanged: (cb: (s: AppSettings) => void) => () => void
       authCurrent: () => Promise<AuthState>
       authSignIn: () => Promise<AuthState>
       authSignOut: () => Promise<AuthState>
@@ -35,11 +45,22 @@ declare global {
       appQuit: () => Promise<void>
       dashboardUrl: () => Promise<string | null>
       openDashboard: () => Promise<void>
+      alertsList: (filter: AlertFilter) => Promise<Alert[]>
+      alertsSummary: () => Promise<AlertSummary>
+      alertsAck: (id: string) => Promise<void>
+      alertsResolve: (id: string) => Promise<void>
+      alertsSnooze: (id: string) => Promise<void>
+      alertsResolveAll: () => Promise<number>
+      onAlertsUpdated: (cb: () => void) => () => void
+      syncStatus: () => Promise<SyncStatus | null>
+      syncDrain: () => Promise<SyncStatus | null>
+      syncTeamOverview: () => Promise<TeamOverview | null>
+      onSyncStatusChanged: (cb: (s: SyncStatus | null) => void) => () => void
     }
   }
 }
 
-type TabId = 'overview' | 'providers' | 'sessions' | 'settings'
+type TabId = 'overview' | 'providers' | 'sessions' | 'alerts' | 'team' | 'settings'
 const TABS: { id: TabId; label: string; icon: JSX.Element }[] = [
   {
     id: 'overview',
@@ -73,6 +94,30 @@ const TABS: { id: TabId; label: string; icon: JSX.Element }[] = [
     ),
   },
   {
+    id: 'alerts',
+    label: 'Alerts',
+    icon: (
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+           strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+        <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+      </svg>
+    ),
+  },
+  {
+    id: 'team',
+    label: 'Team',
+    icon: (
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+           strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+        <circle cx="9" cy="7" r="4" />
+        <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+        <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+      </svg>
+    ),
+  },
+  {
     id: 'settings',
     label: 'Settings',
     icon: (
@@ -88,12 +133,15 @@ const TABS: { id: TabId; label: string; icon: JSX.Element }[] = [
 const ACTIVE_TAB_KEY = 'lcm.activeTab'
 const PERIOD_KEY = 'lcm.period'
 
-type Period = 'today' | '7d' | '30d'
+type Period = 'today' | '7d' | '1m' | '6m' | '1y'
 
 function loadInitialTab(): TabId {
   try {
     const v = localStorage.getItem(ACTIVE_TAB_KEY)
-    if (v === 'overview' || v === 'providers' || v === 'sessions' || v === 'settings') return v
+    if (
+      v === 'overview' || v === 'providers' || v === 'sessions' ||
+      v === 'alerts' || v === 'team' || v === 'settings'
+    ) return v
   } catch {
     /* localStorage unavailable */
   }
@@ -102,7 +150,10 @@ function loadInitialTab(): TabId {
 function loadInitialPeriod(): Period {
   try {
     const v = localStorage.getItem(PERIOD_KEY)
-    if (v === 'today' || v === '7d' || v === '30d') return v
+    if (v === 'today' || v === '7d' || v === '1m' || v === '6m' || v === '1y') return v
+    // Migration: users persisted '30d' before the period bar was widened
+    // to include 1m/6m/1y. Treat the legacy value as "1m" silently.
+    if (v === '30d') return '1m'
   } catch {
     /* */
   }
@@ -119,11 +170,17 @@ export function App(): JSX.Element {
   const [activeTab, setActiveTab] = useState<TabId>(loadInitialTab)
   const [period, setPeriod] = useState<Period>(loadInitialPeriod)
   const [dashboardUrl, setDashboardUrl] = useState<string | null>(null)
+  const [alertSummary, setAlertSummary] = useState<AlertSummary>({ open: 0, acked: 0, snoozed: 0, resolved: 0 })
   const [, forceTick] = useState(0)
 
   // Track which tabs have been mounted at least once. Inactive tabs render
   // hidden after first mount to keep their state alive cheaply.
   const [mountedTabs, setMountedTabs] = useState<Set<TabId>>(() => new Set([loadInitialTab()]))
+
+  // Lenis-driven inertia scroll on the panel. Hook returns a ref we
+  // attach to the scroll container; the hook owns the RAF loop and
+  // pauses on document.hidden so a hidden tray panel costs zero CPU.
+  const dropdownRef = useLenisScroll<HTMLDivElement>()
 
   const reload = useCallback(async () => {
     const [a, s, ps] = await Promise.all([
@@ -154,6 +211,16 @@ export function App(): JSX.Element {
     void reload()
     return window.api.onUsageUpdated(scheduleReload)
   }, [reload, scheduleReload])
+
+  // Alerts summary drives the tab badge — refreshed on every alerts:updated
+  // broadcast (including ack/resolve/snooze/raise) and on initial mount.
+  useEffect(() => {
+    const fetchSummary = (): void => {
+      void window.api.alertsSummary().then(setAlertSummary)
+    }
+    fetchSummary()
+    return window.api.onAlertsUpdated(fetchSummary)
+  }, [])
 
   // Ticker for "live · Xs ago" pills.
   useEffect(() => {
@@ -193,18 +260,32 @@ export function App(): JSX.Element {
   }
 
   return (
-    <div className="dropdown">
+    <div className="dropdown" ref={dropdownRef}>
       <div className="aurora" aria-hidden />
 
       <header className="dropdown-header">
         <div className="title-block">
           <span className="title-glyph" aria-hidden>
-            <svg viewBox="0 0 24 24" width="14" height="14">
-              <path d="M3 17l5-5 4 4 8-8" fill="none" stroke="currentColor" strokeWidth="2"
-                    strokeLinecap="round" strokeLinejoin="round" />
+            {/* Layered glyph: gradient diamond + lightning bolt + sparkle. */}
+            <svg viewBox="0 0 24 24" width="16" height="16">
+              <defs>
+                <linearGradient id="glyph-grad" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" stopColor="#63adff" />
+                  <stop offset="0.55" stopColor="#a78bfa" />
+                  <stop offset="1" stopColor="#ff7ac6" />
+                </linearGradient>
+              </defs>
+              <path
+                d="M13 2 L4 13 h6 l-2 9 L20 11 h-6 l2 -9 Z"
+                fill="url(#glyph-grad)"
+                stroke="rgba(255,255,255,0.9)"
+                strokeWidth="0.6"
+                strokeLinejoin="round"
+              />
+              <circle cx="19" cy="4.5" r="1.1" fill="#ffffff" opacity="0.95" />
             </svg>
           </span>
-          <span className="title">llm-cost-monitor</span>
+          <span className="title">devbar</span>
           <span className="live-pill" title={`updated ${timeAgo(agg.generatedAt)} ago`}>
             <span className="live-dot" />
             <span>live · {timeAgo(agg.generatedAt)} ago</span>
@@ -224,7 +305,7 @@ export function App(): JSX.Element {
           <button
             type="button"
             className="quit-btn"
-            title="Quit llm-cost-monitor"
+            title="Quit devbar"
             aria-label="Quit"
             onClick={() => void window.api.appQuit()}
           >
@@ -236,19 +317,30 @@ export function App(): JSX.Element {
       <AuthHeader />
 
       <nav className="tab-bar" role="tablist">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            role="tab"
-            aria-selected={activeTab === t.id}
-            className={activeTab === t.id ? 'tab-tile active' : 'tab-tile'}
-            onClick={() => switchTab(t.id)}
-          >
-            <span className="tab-tile-icon">{t.icon}</span>
-            <span className="tab-tile-label">{t.label}</span>
-          </button>
-        ))}
+        {TABS.map((t) => {
+          // Badge count = open + acked + snoozed (everything not resolved).
+          // Acked alerts still count so the badge doesn't disappear the moment
+          // the user dismisses one — they should resolve it to clear it.
+          const badge = t.id === 'alerts'
+            ? alertSummary.open + alertSummary.acked + alertSummary.snoozed
+            : 0
+          return (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === t.id}
+              className={activeTab === t.id ? 'tab-tile active' : 'tab-tile'}
+              onClick={() => switchTab(t.id)}
+            >
+              <span className="tab-tile-icon">
+                {t.icon}
+                {badge > 0 && <span className="tab-badge">{badge}</span>}
+              </span>
+              <span className="tab-tile-label">{t.label}</span>
+            </button>
+          )
+        })}
       </nav>
 
       <main className="tab-pane">
@@ -259,12 +351,22 @@ export function App(): JSX.Element {
         )}
         {mountedTabs.has('providers') && (
           <div hidden={activeTab !== 'providers'}>
-            <ProvidersTab agg={agg} providers={providers} dashboardUrl={dashboardUrl} />
+            <ProvidersTab agg={agg} providers={providers} dashboardUrl={dashboardUrl} settings={settings} />
           </div>
         )}
         {mountedTabs.has('sessions') && (
           <div hidden={activeTab !== 'sessions'}>
             <SessionsTab agg={agg} />
+          </div>
+        )}
+        {mountedTabs.has('alerts') && (
+          <div hidden={activeTab !== 'alerts'}>
+            <AlertsTab />
+          </div>
+        )}
+        {mountedTabs.has('team') && (
+          <div hidden={activeTab !== 'team'}>
+            <TeamTab settings={settings} />
           </div>
         )}
         {mountedTabs.has('settings') && (

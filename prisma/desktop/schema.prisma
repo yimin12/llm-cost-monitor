@@ -1,0 +1,114 @@
+// Desktop-side schema (per-install Postgres database). Mirrors the manual
+// SQL in migrations/0001_init.sql, 0002_auth_user.sql, 0003_alerts.sql, and
+// 0004_team_sync.sql — those files remain the historical record. New
+// schema changes should land via `prisma migrate dev` against THIS schema
+// instead.
+//
+// We do not generate a client here: queries continue to go through `pg`.
+// Prisma is used purely as the migration tool.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../node_modules/.prisma/desktop"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("LCM_DATABASE_URL")
+}
+
+model schema_version {
+  version Int @id
+
+  @@map("schema_version")
+}
+
+model events {
+  id                       String  @id
+  provider                 String
+  provider_raw_tag         String?
+  model                    String
+  timestamp                BigInt
+  project                  String?
+  project_raw_slug         String?
+  session_id               String?
+  message_id               String?
+  input_tokens             BigInt  @default(0)
+  output_tokens            BigInt  @default(0)
+  cache_read_tokens        BigInt  @default(0)
+  cache_creation_5m_tokens BigInt  @default(0)
+  cache_creation_1h_tokens BigInt  @default(0)
+  reasoning_tokens         BigInt?
+  tool_call_count          BigInt?
+  latency_ms               BigInt?
+  computed_cost_micro_usd  BigInt
+  pricing_snapshot_version String
+  source_file              String
+  source_line_offset       BigInt
+
+  @@index([timestamp(sort: Desc)], map: "events_timestamp_idx")
+  @@index([provider, model], map: "events_provider_model_idx")
+  @@index([project], map: "events_project_idx")
+  @@map("events")
+}
+
+model files {
+  path           String @id
+  mtime          BigInt
+  last_parsed_at BigInt
+  last_offset    BigInt @default(0)
+
+  @@map("files")
+}
+
+model pricing_overrides {
+  model             String  @id
+  input_per_m       BigInt
+  output_per_m      BigInt
+  cache_write_per_m BigInt?
+  cache_read_per_m  BigInt?
+  source            String
+
+  @@map("pricing_overrides")
+}
+
+model auth_user {
+  sub               String   @id
+  email             String
+  email_verified    Boolean  @default(false)
+  name              String?
+  picture_url       String?
+  last_signed_in_at BigInt
+  is_active         Boolean  @default(true)
+
+  @@map("auth_user")
+}
+
+model alerts {
+  // gen_random_uuid() default lives behind pgcrypto; the legacy migration
+  // installs the extension. Prisma represents UUID as String + @db.Uuid.
+  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  type          String
+  severity      String
+  title         String
+  body          String
+  raised_at     BigInt
+  status        String  @default("open")
+  acked_at      BigInt?
+  resolved_at   BigInt?
+  snoozed_until BigInt?
+  signature     String
+  metadata      Json?   @db.JsonB
+
+  // The legacy `WHERE status IN ('open','snoozed','acked')` partial unique
+  // index is not expressible in Prisma (Prisma only supports plain UNIQUE).
+  // We keep it as a regular non-unique index in this schema; the legacy
+  // SQL migration is still the source of truth for the partial constraint.
+  @@index([status, raised_at(sort: Desc)], map: "alerts_status_raised_idx")
+  @@map("alerts")
+}
+
+// NOTE: the v4 team-sync tables (local_node, sync_cursor, sync_audit) live
+// in migrations/0004_team_sync.sql — applied by the legacy in-process
+// runner. They will be promoted to a proper `prisma migrate dev` migration
+// in the next change, so there's a single source of truth going forward.

@@ -25,28 +25,51 @@ body {
    Electron tray panel — see main.tsx for the renderer fork. */
 
 :root {
-  --bg-base: 16, 18, 24;
-  --fg: 245, 245, 247;
-  --fg-dim: 174, 174, 178;
-  --fg-mute: 124, 124, 128;
-  --accent: 99, 173, 255;
-  --accent2: 167, 139, 250;
-  --good: 48, 209, 88;
-  --warn: 255, 159, 10;
-  --danger: 255, 69, 58;
-  --hairline: rgba(255, 255, 255, 0.07);
-  --hairline-strong: rgba(255, 255, 255, 0.12);
-  --card: rgba(255, 255, 255, 0.035);
-  --card-hover: rgba(255, 255, 255, 0.06);
+  /* Higher-contrast palette. Background pulled darker, foregrounds pushed
+     brighter, accents made more saturated to match the menubar reference
+     screenshot. WCAG AA contrast against `--bg-base` for body text. */
+  --bg-base: 10, 12, 18;
+  --fg: 252, 252, 255;
+  --fg-dim: 200, 202, 210;
+  --fg-mute: 148, 150, 160;
+  --accent: 80, 192, 255;
+  --accent2: 184, 132, 255;
+  --good: 60, 230, 120;
+  --warn: 255, 176, 32;
+  --danger: 255, 80, 90;
+  --hairline: rgba(255, 255, 255, 0.10);
+  --hairline-strong: rgba(255, 255, 255, 0.18);
+  --card: rgba(255, 255, 255, 0.06);
+  --card-hover: rgba(255, 255, 255, 0.10);
 }
 
 /* ─────────── shell ─────────── */
+/* SCROLL PERFORMANCE NOTE
+ * The previous version of this rule had `backdrop-filter: blur(28px)
+ * saturate(160%)` directly on the scroll container. backdrop-filter forces
+ * Chromium to recomposite every frame as the contents scroll, which
+ * tanks scroll smoothness in Electron specifically (see
+ * github.com/electron/electron/issues/12906 + #2332).
+ *
+ * Mitigations applied here:
+ *   1. backdrop-filter removed from `.dropdown`. The aurora layer
+ *      already provides depth; the panel itself is now near-opaque so
+ *      we don't need the blurred-translucency trick.
+ *   2. The scroll container is promoted to its own GPU layer via
+ *      `transform: translateZ(0)` + `will-change: scroll-position`.
+ *   3. `overscroll-behavior: contain` stops scroll chains from bubbling
+ *      up to the host BrowserWindow and triggering rubber-band repaints.
+ *   4. `contain: layout paint` is applied to settings-card / provider-
+ *      card / loaded-tab containers below so each row's repaint stays
+ *      bounded to its own subtree instead of forcing a panel-wide
+ *      relayout per scroll tick.
+ */
 .dropdown {
   position: relative;
   isolation: isolate;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0)) ,
-    rgba(var(--bg-base), 0.94);
+    rgba(var(--bg-base), 0.985);
   border: 1px solid var(--hairline-strong);
   border-radius: 16px;
   color: rgb(var(--fg));
@@ -57,9 +80,15 @@ body {
   padding: 12px 14px 10px;
   width: 100%;
   overflow-y: auto;
+  overscroll-behavior: contain;
   font-size: 12px;
-  backdrop-filter: blur(28px) saturate(160%);
-  -webkit-backdrop-filter: blur(28px) saturate(160%);
+  /* Promote to its own compositor layer so scrolling doesn't repaint
+     the menubar's host window. translateZ(0) is the canonical incantation;
+     `will-change: scroll-position` tells Chromium specifically that
+     scrollTop is the property mutating, which lets it skip layout
+     recalc on each frame. */
+  transform: translateZ(0);
+  will-change: scroll-position;
   box-shadow:
     0 16px 48px rgba(0, 0, 0, 0.55),
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
@@ -131,20 +160,32 @@ body {
   min-width: 0;
 }
 .title-glyph {
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
   display: grid;
   place-items: center;
-  border-radius: 7px;
-  background: linear-gradient(135deg, #63adff, #a78bfa);
-  color: #0a0c12;
-  box-shadow: 0 2px 10px rgba(99, 173, 255, 0.4);
+  border-radius: 9px;
+  /* The SVG renders its own gradient now; the chip background is a darker
+     glow plate so the bright lightning bolt has something to pop off of. */
+  background:
+    radial-gradient(120% 120% at 30% 20%, rgba(99, 173, 255, 0.35), transparent 60%),
+    linear-gradient(135deg, rgba(99, 173, 255, 0.18), rgba(167, 139, 250, 0.18));
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow:
+    0 0 0 1px rgba(99, 173, 255, 0.18),
+    0 4px 16px rgba(99, 173, 255, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
 .title {
-  font-size: 13px;
-  font-weight: 650;
-  letter-spacing: -0.005em;
-  color: rgba(var(--fg), 0.95);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  /* Brand wordmark gets its own gradient text fill — picks up the same
+     palette as the glyph and matches the menubar reference's vibe. */
+  background: linear-gradient(135deg, #ffffff 0%, #e6ecff 60%, #c9b8ff 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 .live-pill {
   display: inline-flex;
@@ -674,6 +715,14 @@ body {
   color: rgba(99, 173, 255, 0.95);
   border-color: rgba(99, 173, 255, 0.24);
 }
+/* OAuth (free-tier identity, no paid plan tier — Gemini's Google
+   Account / Workspace login). Distinct from subscription so the user
+   doesn't read it as "I'm paying for something". */
+.plan-chip.plan-oauth {
+  background: rgba(184, 132, 255, 0.12);
+  color: rgba(206, 174, 255, 0.95);
+  border-color: rgba(184, 132, 255, 0.24);
+}
 .plan-chip.plan-none {
   color: rgba(var(--fg), 0.35);
 }
@@ -826,27 +875,42 @@ body {
 
 /* ─────────── tab bar ─────────── */
 .tab-bar {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 2px;
+  display: flex;
+  /* Tabs distribute evenly when they fit (flex: 1 0 auto on each tile) and
+     scroll horizontally when they don't, never wrap. Future tabs added beyond
+     what 390 px can show will simply slide off the right edge — the user can
+     swipe / scroll-wheel through them. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x proximity;
+  gap: 1px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--hairline);
   border-radius: 12px;
   padding: 3px;
+  flex-shrink: 0;
 }
+.tab-bar::-webkit-scrollbar { display: none; }
+
 .tab-tile {
+  flex: 1 0 auto;
+  min-width: 64px;
+  scroll-snap-align: start;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 3px;
-  padding: 8px 4px;
+  padding: 7px 8px 6px;
   background: transparent;
   border: 0;
-  border-radius: 9px;
+  border-radius: 8px;
   color: rgba(var(--fg), 0.55);
   cursor: pointer;
   transition: background 140ms ease, color 140ms ease, box-shadow 140ms ease;
+  white-space: nowrap;
 }
 .tab-tile:hover:not(.active) {
   color: rgba(var(--fg), 0.85);
@@ -857,11 +921,257 @@ body {
   color: #0a0c12;
   box-shadow: 0 4px 14px rgba(99, 173, 255, 0.32);
 }
-.tab-tile-icon { display: grid; place-items: center; }
-.tab-tile-label {
-  font-size: 10px;
+.tab-tile-icon { display: grid; place-items: center; position: relative; }
+/* Tab tile icons are 14px when tabs are crowded — keeps the 5-tab row from
+   wrapping at 390px. Was 16px when there were 4 tabs. */
+.tab-tile-icon svg { width: 14px; height: 14px; }
+.tab-badge {
+  position: absolute;
+  top: -5px;
+  right: -8px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ff6961, #ff453a);
+  color: #ffffff;
+  font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  display: grid;
+  place-items: center;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  box-shadow: 0 0 0 1.5px rgba(10, 12, 18, 1), 0 1px 6px rgba(255, 69, 58, 0.55);
+}
+.tab-tile.active .tab-badge {
+  box-shadow: 0 0 0 1.5px #c9d8ff, 0 1px 6px rgba(255, 69, 58, 0.6);
+}
+.tab-tile-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* ─────────── alerts tab ─────────── */
+.alerts-head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 2px;
+}
+.alerts-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.alerts-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: rgba(var(--fg), 0.97);
+  letter-spacing: -0.01em;
+}
+.alerts-pill {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 3px 9px;
+  border-radius: 999px;
+}
+.alerts-pill.critical {
+  background: rgba(255, 69, 58, 0.15);
+  color: #ff6961;
+  border: 1px solid rgba(255, 69, 58, 0.35);
+}
+.alerts-pill.warning {
+  background: rgba(255, 159, 10, 0.15);
+  color: #ffb340;
+  border: 1px solid rgba(255, 159, 10, 0.35);
+}
+.alerts-pill.ok {
+  background: rgba(48, 209, 88, 0.12);
+  color: rgba(48, 209, 88, 0.95);
+  border: 1px solid rgba(48, 209, 88, 0.25);
+}
+.alerts-filter-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.alerts-filter {
+  display: inline-flex;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  padding: 2px;
+  gap: 1px;
+}
+.alerts-filter-tab {
+  background: transparent;
+  border: 0;
+  color: rgba(var(--fg), 0.55);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 999px;
+  transition: background 140ms ease, color 140ms ease;
+}
+.alerts-filter-tab:hover:not(.active) { color: rgba(var(--fg), 0.85); }
+.alerts-filter-tab.active {
+  background: linear-gradient(135deg, rgba(99, 173, 255, 0.95), rgba(167, 139, 250, 0.95));
+  color: #0a0c12;
+  box-shadow: 0 2px 8px rgba(99, 173, 255, 0.3);
+}
+.alerts-resolve-all {
+  background: rgba(48, 209, 88, 0.12);
+  border: 1px solid rgba(48, 209, 88, 0.3);
+  border-radius: 999px;
+  color: rgba(48, 209, 88, 0.95);
+  font-size: 11px;
+  font-weight: 650;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+.alerts-resolve-all:hover:not(:disabled) {
+  background: rgba(48, 209, 88, 0.2);
+  border-color: rgba(48, 209, 88, 0.5);
+}
+.alerts-resolve-all:disabled { opacity: 0.55; cursor: progress; }
+
+.alerts-empty {
+  font-size: 11.5px;
+  color: rgba(var(--fg), 0.5);
+  text-align: center;
+  padding: 32px 12px;
+  font-style: italic;
+}
+
+.alerts-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.alert-card {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.015));
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: transform 160ms ease, border-color 160ms ease, opacity 160ms ease;
+}
+.alert-card:hover { transform: translateY(-1px); border-color: rgba(255, 255, 255, 0.16); }
+.alert-card.sev-critical { border-color: rgba(255, 69, 58, 0.32); }
+.alert-card.sev-warning  { border-color: rgba(255, 159, 10, 0.28); }
+.alert-card[data-dimmed='true'] { opacity: 0.6; }
+
+.alert-card-head {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+.alert-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgb(var(--fg-mute));
+}
+.alert-dot.sev-warning { background: #ff9f0a; box-shadow: 0 0 8px rgba(255, 159, 10, 0.55); }
+.alert-dot.sev-critical { background: #ff453a; box-shadow: 0 0 10px rgba(255, 69, 58, 0.7); animation: alert-pulse 1.4s ease-in-out infinite; }
+.alert-dot.sev-info { background: #63adff; }
+@keyframes alert-pulse {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(0.78); opacity: 0.7; }
+}
+.alert-title {
+  font-size: 12.5px;
+  font-weight: 650;
+  color: rgba(var(--fg), 0.95);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.alert-time {
+  font-size: 10px;
+  color: rgba(var(--fg), 0.45);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.alert-body {
+  font-size: 11px;
+  color: rgba(var(--fg), 0.7);
+  line-height: 1.45;
+  padding-left: 16px;
+}
+.alert-meta {
+  font-size: 10px;
+  color: rgba(var(--fg), 0.42);
+  font-style: italic;
+  padding-left: 16px;
+}
+.alert-actions {
+  display: flex;
+  gap: 6px;
+  padding-left: 16px;
+  margin-top: 2px;
+}
+.alert-btn {
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 10.5px;
+  font-weight: 650;
+  padding: 4px 12px;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, transform 80ms ease;
+}
+.alert-btn:active:not(:disabled) { transform: scale(0.96); }
+.alert-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.alert-btn-ack {
+  background: rgba(99, 173, 255, 0.16);
+  border-color: rgba(99, 173, 255, 0.4);
+  color: #9ec6ff;
+}
+.alert-btn-ack:hover:not(:disabled) {
+  background: rgba(99, 173, 255, 0.28);
+  border-color: rgba(99, 173, 255, 0.6);
+}
+.alert-btn-resolve {
+  background: rgba(48, 209, 88, 0.16);
+  border-color: rgba(48, 209, 88, 0.4);
+  color: rgba(48, 209, 88, 1);
+}
+.alert-btn-resolve:hover:not(:disabled) {
+  background: rgba(48, 209, 88, 0.28);
+  border-color: rgba(48, 209, 88, 0.6);
+}
+.alert-btn-snooze {
+  background: rgba(255, 159, 10, 0.16);
+  border-color: rgba(255, 159, 10, 0.4);
+  color: #ffb340;
+}
+.alert-btn-snooze:hover:not(:disabled) {
+  background: rgba(255, 159, 10, 0.28);
+  border-color: rgba(255, 159, 10, 0.6);
+}
+
+.alerts-foot {
+  font-size: 10px;
+  color: rgba(var(--fg), 0.4);
+  text-align: center;
+  padding: 12px 8px 4px;
+  line-height: 1.5;
+  font-style: italic;
 }
 
 .tab-pane {
@@ -908,6 +1218,9 @@ body {
   flex-direction: column;
   gap: 8px;
   transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+  /* Bound the card's layout/paint to its own subtree so scrolling the
+     dropdown doesn't trigger a panel-wide relayout for every card. */
+  contain: layout paint;
 }
 .provider-card:hover {
   background: var(--card-hover);
@@ -1047,6 +1360,8 @@ body {
   flex-direction: column;
   gap: 8px;
   transition: background 200ms ease, border-color 200ms ease;
+  /* Same scroll-isolation trick as `.provider-card`. */
+  contain: layout paint;
 }
 .settings-card:hover {
   background: var(--card-hover);
@@ -1122,3 +1437,108 @@ body {
   line-height: 1.5;
 }
 .about-card .about-line strong { color: rgba(var(--fg), 0.9); font-weight: 650; }
+
+/* ─────────── team-sync form ─────────── */
+.settings-hint {
+  font-size: 10.5px;
+  color: rgba(var(--fg), 0.55);
+  line-height: 1.45;
+  margin-bottom: 4px;
+}
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.form-row {
+  display: grid;
+  grid-template-columns: 84px 1fr;
+  align-items: center;
+  gap: 10px;
+}
+.form-row > span {
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(var(--fg), 0.6);
+  letter-spacing: 0.02em;
+}
+.form-row > input {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  color: rgba(var(--fg), 0.92);
+  font-size: 11px;
+  padding: 5px 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.form-row > input:focus {
+  outline: none;
+  border-color: rgba(99, 173, 255, 0.45);
+  background: rgba(255, 255, 255, 0.06);
+}
+.form-radio-group {
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.form-radio-group legend {
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(var(--fg), 0.55);
+  letter-spacing: 0.02em;
+}
+.form-radio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10.5px;
+  color: rgba(var(--fg), 0.78);
+  cursor: pointer;
+}
+.form-radio input { accent-color: #63adff; }
+.form-error { color: rgba(255, 99, 99, 0.95); font-size: 10.5px; font-weight: 500; }
+.toggle-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  user-select: none;
+}
+.toggle-pill input { accent-color: #63adff; transform: scale(0.95); }
+.mono.small { font-size: 10px; opacity: 0.7; }
+
+/* ─────────── empty-state for team tab ─────────── */
+.empty-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 16px 14px;
+  border: 1px dashed var(--hairline-strong);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.025);
+  color: rgba(var(--fg), 0.75);
+}
+.empty-tab h3 {
+  font-size: 12px;
+  font-weight: 650;
+  margin: 0;
+}
+.empty-tab p {
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgba(var(--fg), 0.6);
+}
+.team-member-row .row-label {
+  font-weight: 600;
+}

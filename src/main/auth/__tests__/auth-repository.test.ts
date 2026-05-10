@@ -38,11 +38,14 @@ describe('AuthRepository (Postgres)', () => {
     repo = new AuthRepository(pool)
   })
 
-  it('schema_version is 2 after migrations', async () => {
+  it('schema_version is at the latest after migrations', async () => {
     const r = await pool.query<{ max: number }>(
       'SELECT MAX(version) AS max FROM schema_version',
     )
-    expect(r.rows[0]?.max).toBe(2)
+    // Bump this when a new migration lands. Currently:
+    //   v1 = events/files/pricing_overrides, v2 = auth_user,
+    //   v3 = alerts, v4 = team-sync (local_node + sync_cursor + sync_audit)
+    expect(r.rows[0]?.max).toBe(4)
   })
 
   it('upsertActive + findActive round-trip', async () => {
