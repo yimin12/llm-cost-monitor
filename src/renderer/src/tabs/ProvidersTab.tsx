@@ -1,6 +1,7 @@
 import type { AggregateSnapshot } from '@shared/aggregates'
 import type { AppSettings, ProviderListEntry } from '@shared/ipc-channels'
 
+import { ProviderIcon, hasBrandIcon } from '../components/ProviderIcon'
 import { microToUsd, providerColor, providerName, timeAgo } from '../lib/format'
 
 export function ProvidersTab({ agg, providers, dashboardUrl, settings }: {
@@ -47,8 +48,22 @@ export function ProvidersTab({ agg, providers, dashboardUrl, settings }: {
           return (
             <li key={p.id} className="provider-card" data-available={p.isAvailable}>
               <div className="provider-card-head">
-                <span className="provider-icon" style={{ background: color, boxShadow: `0 0 12px ${color}66` }}>
-                  {providerName(p.id).charAt(0)}
+                <span
+                  className="provider-icon"
+                  data-has-brand={hasBrandIcon(p.id)}
+                  style={{
+                    background: hasBrandIcon(p.id)
+                      ? `${color}24`
+                      : color,
+                    boxShadow: `0 0 12px ${color}66`,
+                    color: hasBrandIcon(p.id) ? color : '#0a0c12',
+                  }}
+                >
+                  {hasBrandIcon(p.id) ? (
+                    <ProviderIcon id={p.id} size={18} />
+                  ) : (
+                    providerName(p.id).charAt(0)
+                  )}
                 </span>
                 <div className="provider-id">
                   <span className="provider-name">{p.name}</span>
