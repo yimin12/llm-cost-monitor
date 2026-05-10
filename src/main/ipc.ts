@@ -4,6 +4,9 @@ import {
   EVENT,
   IPC,
   type AggregateSnapshot,
+  type Alert,
+  type AlertFilter,
+  type AlertSummary,
   type AppSettings,
   type AuthState,
   type ProviderListEntry,
@@ -14,6 +17,7 @@ import {
 import type { TeamSyncSettings } from '@shared/sync'
 
 import type { Aggregator } from './aggregation/aggregator'
+import type { AlertRepository } from './alerts/alert-repository'
 import type { AuthService } from './auth/auth-service'
 import type { PricingTable } from './pricing/pricing-table'
 import type { ProviderRegistry } from './providers/registry'
@@ -28,6 +32,7 @@ export interface IpcDeps {
   providers: ProviderRegistry
   settings: SettingsStore
   auth: AuthService
+  alerts: AlertRepository
   syncQueue: SyncQueue | null
   // Fetches a TeamOverview from the backend. null when sync is disabled
   // or the backend is unreachable; renderer treats both the same.
@@ -134,11 +139,45 @@ export function registerIpcHandlers(deps: IpcDeps): void {
       await shell.openExternal(url)
     }
   })
+
+  // Alerts. The sampler service is what raises rows in main; the renderer is
+  // strictly read + react. Mutations broadcast EVENT.ALERTS_UPDATED so any
+  // open panel re-fetches.
+  ipcMain.handle(IPC.ALERTS_LIST, async (_e, filter: AlertFilter): Promise<Alert[]> => {
+    return deps.alerts.list(filter)
+  })
+  ipcMain.handle(IPC.ALERTS_SUMMARY, async (): Promise<AlertSummary> => {
+    return deps.alerts.summary()
+  })
+  ipcMain.handle(IPC.ALERTS_ACK, async (_e, id: string): Promise<void> => {
+    await deps.alerts.ack(id)
+    broadcastAlertsUpdated()
+  })
+  ipcMain.handle(IPC.ALERTS_RESOLVE, async (_e, id: string): Promise<void> => {
+    await deps.alerts.resolve(id)
+    broadcastAlertsUpdated()
+  })
+  ipcMain.handle(IPC.ALERTS_SNOOZE, async (_e, id: string): Promise<void> => {
+    const minutes = deps.settings.get().alerts.snoozeMinutes
+    await deps.alerts.snooze(id, Date.now() + minutes * 60_000)
+    broadcastAlertsUpdated()
+  })
+  ipcMain.handle(IPC.ALERTS_RESOLVE_ALL, async (): Promise<number> => {
+    const n = await deps.alerts.resolveAll()
+    broadcastAlertsUpdated()
+    return n
+  })
 }
 
 export function broadcastUsageUpdated(): void {
   for (const win of BrowserWindow.getAllWindows()) {
     win.webContents.send(EVENT.USAGE_UPDATED)
+  }
+}
+
+export function broadcastAlertsUpdated(): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.send(EVENT.ALERTS_UPDATED)
   }
 }
 

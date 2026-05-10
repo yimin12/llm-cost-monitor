@@ -1,12 +1,14 @@
 import type { AggregateSnapshot } from '@shared/aggregates'
-import type { ProviderListEntry } from '@shared/ipc-channels'
+import type { AppSettings, ProviderListEntry } from '@shared/ipc-channels'
 
+import { ProviderIcon, hasBrandIcon } from '../components/ProviderIcon'
 import { microToUsd, providerColor, providerName, timeAgo } from '../lib/format'
 
-export function ProvidersTab({ agg, providers, dashboardUrl }: {
+export function ProvidersTab({ agg, providers, dashboardUrl, settings }: {
   agg: AggregateSnapshot
   providers: ProviderListEntry[]
   dashboardUrl: string | null
+  settings: AppSettings | null
 }): JSX.Element {
   const todayByProvider = new Map(agg.byProviderToday.map((p) => [p.provider, p]))
   const last30dByProvider = new Map(agg.byProvider30d.map((p) => [p.provider, p]))
@@ -46,29 +48,52 @@ export function ProvidersTab({ agg, providers, dashboardUrl }: {
           return (
             <li key={p.id} className="provider-card" data-available={p.isAvailable}>
               <div className="provider-card-head">
-                <span className="provider-icon" style={{ background: color, boxShadow: `0 0 12px ${color}66` }}>
-                  {providerName(p.id).charAt(0)}
+                <span
+                  className="provider-icon"
+                  data-has-brand={hasBrandIcon(p.id)}
+                  style={{
+                    background: hasBrandIcon(p.id)
+                      ? `${color}24`
+                      : color,
+                    boxShadow: `0 0 12px ${color}66`,
+                    color: hasBrandIcon(p.id) ? color : '#0a0c12',
+                  }}
+                >
+                  {hasBrandIcon(p.id) ? (
+                    <ProviderIcon id={p.id} size={18} />
+                  ) : (
+                    providerName(p.id).charAt(0)
+                  )}
                 </span>
                 <div className="provider-id">
                   <span className="provider-name">{p.name}</span>
                   <span className="provider-sub">{providerName(p.id).toLowerCase()}</span>
                 </div>
-                <span className="status-pill" data-state={p.isAvailable ? 'on' : 'off'}>
-                  {p.isAvailable ? 'detected' : 'no data'}
-                </span>
-                <span
-                  className={`plan-chip plan-${p.plan.authMode}`}
-                  title={
-                    p.plan.source === null
+                {(() => {
+                  // User can override the chip label per-provider in
+                  // Settings. When set, the chip renders as a subscription
+                  // tier (because that's the most common reason to
+                  // override — e.g. claiming Gemini Pro that the OIDC
+                  // token can't surface).
+                  const override = settings?.planOverrides?.[p.id]?.trim()
+                  const useOverride = override !== undefined && override.length > 0
+                  const mode = useOverride ? 'subscription' : p.plan.authMode
+                  const titleText = useOverride
+                    ? `Manual override · ${override}`
+                    : p.plan.source === null
                       ? 'No credentials detected'
                       : `${p.plan.source}${p.plan.detail !== null ? ` · ${p.plan.detail}` : ''}`
-                  }
-                >
-                  {p.plan.authMode === 'subscription' && (p.plan.planName ?? 'Subscription')}
-                  {p.plan.authMode === 'apiKey' && 'API key'}
-                  {p.plan.authMode === 'none' && 'no auth'}
-                  {p.plan.authMode === 'unknown' && 'unknown'}
-                </span>
+                  return (
+                    <span className={`plan-chip plan-${mode}`} title={titleText}>
+                      {useOverride && `Plan: ${override}`}
+                      {!useOverride && p.plan.authMode === 'subscription' && `Plan: ${p.plan.planName ?? 'Subscription'}`}
+                      {!useOverride && p.plan.authMode === 'oauth' && (p.plan.planName ?? 'OAuth')}
+                      {!useOverride && p.plan.authMode === 'apiKey' && 'API Calling'}
+                      {!useOverride && p.plan.authMode === 'none' && 'no auth'}
+                      {!useOverride && p.plan.authMode === 'unknown' && 'unknown'}
+                    </span>
+                  )
+                })()}
               </div>
               <div className="provider-card-stats">
                 <div className="stat">

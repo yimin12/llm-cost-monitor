@@ -1,0 +1,132 @@
+// Server-side schema (team-sync backend Postgres database). Mirrors the
+// manual SQL in server-migrations/0001_init.sql. Future server schema
+// changes go through `prisma migrate dev --schema prisma/server/schema.prisma`.
+//
+// Queries on the server continue to use `pg` (TeamService writes raw SQL);
+// Prisma is migration-only.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../node_modules/.prisma/server"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("LCM_SERVER_DATABASE_URL")
+}
+
+model schema_version {
+  version Int @id
+
+  @@map("schema_version")
+}
+
+model teams {
+  id            String  @id
+  name          String
+  privacy_floor String  @default("redacted")
+  created_at    BigInt
+  removed_at    BigInt?
+
+  @@map("teams")
+}
+
+model team_members {
+  team_id      String
+  user_id      String
+  role         String  @default("member")
+  status       String  @default("active")
+  display_name String?
+  joined_at    BigInt
+  removed_at   BigInt?
+
+  @@id([team_id, user_id])
+  @@map("team_members")
+}
+
+model nodes {
+  id           String  @id
+  user_id      String
+  team_id      String
+  display_name String?
+  platform     String?
+  app_version  String?
+  enrolled_at  BigInt
+  last_seen_at BigInt?
+
+  @@index([team_id], map: "nodes_team_idx")
+  @@map("nodes")
+}
+
+model usage_events {
+  sync_event_id            String  @id
+  team_id                  String
+  user_id                  String
+  node_id                  String
+  local_event_id           String
+  payload_hash             String
+  privacy_level            String
+
+  provider                 String
+  provider_raw_tag         String?
+  model                    String
+  timestamp                BigInt
+
+  project                  String?
+  project_hash             String?
+  session_id               String?
+  message_id               String?
+
+  input_tokens             BigInt  @default(0)
+  output_tokens            BigInt  @default(0)
+  cache_read_tokens        BigInt  @default(0)
+  cache_creation_5m_tokens BigInt  @default(0)
+  cache_creation_1h_tokens BigInt  @default(0)
+  reasoning_tokens         BigInt?
+  tool_call_count          BigInt?
+  latency_ms               BigInt?
+
+  cost_micro_usd           BigInt
+  pricing_snapshot_version String
+
+  uploaded_at              BigInt
+
+  @@index([team_id, timestamp(sort: Desc)], map: "usage_events_team_ts_idx")
+  @@index([team_id, user_id], map: "usage_events_team_user_idx")
+  @@index([team_id, project_hash], map: "usage_events_team_project_idx")
+  @@map("usage_events")
+}
+
+model daily_aggregates {
+  team_id                  String
+  user_id                  String
+  node_id                  String
+  date                     String
+  provider                 String
+  model                    String
+  event_count              BigInt @default(0)
+  input_tokens             BigInt @default(0)
+  output_tokens            BigInt @default(0)
+  cache_read_tokens        BigInt @default(0)
+  cache_creation_5m_tokens BigInt @default(0)
+  cache_creation_1h_tokens BigInt @default(0)
+  reasoning_tokens         BigInt @default(0)
+  cost_micro_usd           BigInt @default(0)
+  pricing_snapshot_version String
+  uploaded_at              BigInt
+
+  @@id([team_id, user_id, node_id, date, provider, model])
+  @@index([team_id, date(sort: Desc)], map: "daily_aggregates_team_date_idx")
+  @@map("daily_aggregates")
+}
+
+model sync_conflicts {
+  id            BigInt  @id @default(autoincrement())
+  occurred_at   BigInt
+  sync_event_id String
+  prior_hash    String
+  new_hash      String
+  detail        String?
+
+  @@map("sync_conflicts")
+}

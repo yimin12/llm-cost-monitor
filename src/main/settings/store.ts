@@ -34,6 +34,13 @@ export class SettingsStore {
       tray: { ...this.cached.tray, ...(patch.tray ?? {}) },
       alerts: { ...this.cached.alerts, ...(patch.alerts ?? {}) },
       teamSync: { ...this.cached.teamSync, ...(patch.teamSync ?? {}) },
+      // Shallow merge so callers can patch a single provider without
+      // dropping the others. Empty-string values are filtered out below
+      // by the renderer when reading the override.
+      planOverrides: {
+        ...this.cached.planOverrides,
+        ...(patch.planOverrides ?? {}),
+      },
       schemaVersion: SETTINGS_SCHEMA_VERSION,
     }
     this.persist(next)
@@ -101,6 +108,7 @@ function migrate(parsed: Partial<AppSettings>): AppSettings {
     tray: { ...DEFAULT_SETTINGS.tray, ...(parsed.tray ?? {}) },
     alerts: { ...DEFAULT_SETTINGS.alerts, ...(parsed.alerts ?? {}) },
     teamSync: { ...DEFAULT_TEAM_SYNC, ...(parsed.teamSync ?? {}) },
+    planOverrides: { ...(parsed.planOverrides ?? {}) },
     schemaVersion: SETTINGS_SCHEMA_VERSION,
   }
   return base

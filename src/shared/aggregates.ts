@@ -59,9 +59,18 @@ export interface AggregateSnapshot {
   generatedAt: number
   today: RangeTotal
   last7d: RangeTotal
+  // last30d is the legacy 30-day window — exposed both as `last30d` (kept
+  // for back-compat with the Providers cards + Web KPI) and surfaced under
+  // the "1m" label in the period selector.
   last30d: RangeTotal
+  // Wider windows for the period selector. 6m = last 180 days, 1y = last
+  // 365. Computed via the same SQL window as last7d/last30d.
+  last6m: RangeTotal
+  last1y: RangeTotal
   byProviderToday: CostByProvider[]
   byProvider30d: CostByProvider[]
+  byProvider6m: CostByProvider[]
+  byProvider1y: CostByProvider[]
   topModelsToday: CostByModel[]
   topProjectsToday: CostByProject[]
   forecast: MonthlyForecast | null

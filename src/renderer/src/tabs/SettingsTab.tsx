@@ -100,12 +100,14 @@ export function SettingsTab({
         </ul>
       </section>
 
+      <PlanOverrideCard providers={providers} settings={settings} />
+
       <section className="settings-card about-card">
         <div className="settings-card-head">
           <h3>About</h3>
         </div>
         <p className="about-line">
-          <strong>llm-cost-monitor</strong> · tracks LLM token usage + cost
+          <strong>devbar</strong> · tracks LLM token usage + cost
           across providers. <strong>On-device only by default</strong> — team
           sync is opt-in and uploads only what your privacy level allows.
         </p>
@@ -263,6 +265,76 @@ function TeamSyncCard({ settings }: { settings: AppSettings | null }): JSX.Eleme
       >
         {draining ? 'syncing…' : 'sync now'}
       </button>
+    </section>
+  )
+}
+
+function PlanOverrideCard({
+  providers,
+  settings,
+}: {
+  providers: ProviderListEntry[]
+  settings: AppSettings | null
+}): JSX.Element {
+  // Local form mirror so each input is responsive; commit to settings on
+  // blur. Pre-seed from the persisted settings each time those change.
+  const [drafts, setDrafts] = useState<Record<string, string>>(() => ({}))
+
+  useEffect(() => {
+    if (settings === null) return
+    setDrafts({ ...settings.planOverrides })
+  }, [settings])
+
+  const commit = useCallback(async (id: string, value: string) => {
+    const cur = settings?.planOverrides ?? {}
+    const trimmed = value.trim()
+    const next = { ...cur }
+    if (trimmed.length === 0) {
+      delete next[id]
+    } else {
+      next[id] = trimmed
+    }
+    await window.api.setSettings({ planOverrides: next })
+  }, [settings])
+
+  return (
+    <section className="settings-card">
+      <div className="settings-card-head">
+        <h3>Plan label override</h3>
+        <span className="settings-sub">manual</span>
+      </div>
+      <p className="settings-hint">
+        Some vendors don&rsquo;t expose subscription tier in their local
+        OAuth tokens (notably Google / Gemini). Set a label here to force
+        the chip to read &ldquo;Plan: <em>your text</em>&rdquo;. Leave
+        blank to fall back to the auto-detected value.
+      </p>
+      <div className="settings-form">
+        {providers.map((p) => {
+          const detected =
+            p.plan.authMode === 'subscription'
+              ? `Plan: ${p.plan.planName ?? 'Subscription'}`
+              : p.plan.authMode === 'oauth'
+                ? (p.plan.planName ?? 'OAuth')
+                : p.plan.authMode === 'apiKey'
+                  ? 'API Calling'
+                  : p.plan.authMode === 'none'
+                    ? 'no auth'
+                    : 'unknown'
+          return (
+            <label key={p.id} className="form-row">
+              <span>{p.name}</span>
+              <input
+                type="text"
+                placeholder={detected}
+                value={drafts[p.id] ?? ''}
+                onChange={(e) => setDrafts((d) => ({ ...d, [p.id]: e.target.value }))}
+                onBlur={() => void commit(p.id, drafts[p.id] ?? '')}
+              />
+            </label>
+          )
+        })}
+      </div>
     </section>
   )
 }

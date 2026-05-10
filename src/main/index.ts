@@ -2,14 +2,24 @@ import { app, Tray, BrowserWindow, nativeImage, screen } from 'electron'
 import path from 'path'
 
 import { Aggregator } from './aggregation/aggregator'
+import { AlertRepository } from './alerts/alert-repository'
+import { AlertNotifier } from './alerts/notifier'
+import { AlertSampler } from './alerts/sampler'
+import { getAlertTrayIcon } from './tray-icons'
 import { AuthRepository } from './auth/auth-repository'
 import { AuthService } from './auth/auth-service'
 import { KeychainStore } from './auth/keychain-store'
-import { broadcastSyncStatusChanged, broadcastUsageUpdated, registerIpcHandlers } from './ipc'
+import {
+  broadcastAlertsUpdated,
+  broadcastSyncStatusChanged,
+  broadcastUsageUpdated,
+  registerIpcHandlers,
+} from './ipc'
 import { loadBundledPricing } from './pricing/load-bundled'
 import type { PricingTable } from './pricing/pricing-table'
 import { ProviderRegistry } from './providers/registry'
 import { SettingsStore } from './settings/store'
+import { StatuslineExporter } from './statusline-export'
 import { openPool, type Pool } from './storage/connect'
 import { EventRepository } from './storage/event-repository'
 import { FileCache } from './storage/file-cache'
@@ -31,6 +41,8 @@ let pool: Pool | null = null
 let events: EventRepository | null = null
 let providers: ProviderRegistry | null = null
 let aggregator: Aggregator | null = null
+let alerts: AlertRepository | null = null
+let baseTrayIcon: Electron.NativeImage | null = null
 
 function getIconPath(): string {
   return path.join(
@@ -121,17 +133,55 @@ function toggleDropdown(): void {
   dropdownWin.focus()
 }
 
-async function updateTrayTitle(): Promise<void> {
+async function updateTrayPresentation(): Promise<void> {
   if (tray === null || aggregator === null) return
   const snap = await aggregator.snapshot()
   const usd = Number(snap.today.costMicroUsd) / 1_000_000
-  const formatted = `$${usd.toFixed(2)}`
+  const cost = `$${usd.toFixed(2)}`
+
+  // Live count of "actionable" alerts (open or acked-but-unresolved). Snoozed
+  // and resolved alerts don't pollute the tray. Falls back to 0 when the
+  // repo isn't ready yet — first refresh runs before app boot completes.
+  let openCount = 0
+  if (alerts !== null) {
+    try {
+      const summary = await alerts.summary()
+      openCount = summary.open + summary.acked
+    } catch {
+      // ignore — keep tray sane if the DB hiccups
+    }
+  }
+  const hasAlerts = openCount > 0
+
+  // Icon swap: warning-triangle template when alerts pending, default chart
+  // glyph otherwise. Both are template images so macOS tints them with the
+  // system foreground color.
+  if (hasAlerts) {
+    tray.setImage(getAlertTrayIcon())
+  } else if (baseTrayIcon !== null) {
+    tray.setImage(baseTrayIcon)
+  }
+
+  // Title text follows the user's signalling rule: when alerts pending,
+  // the menubar shows ONLY the count next to the warning-triangle icon —
+  // no word, no cost. The icon already carries the "alert" semantics so
+  // any extra label would be redundant. When all clear, the cost takes
+  // the slot. Linux still spells it out in the tooltip since it has no
+  // icon-swap visual signal to lean on.
+  const title = hasAlerts ? String(openCount) : cost
   if (process.platform === 'darwin') {
-    tray.setTitle(formatted)
+    tray.setTitle(title)
   } else {
-    tray.setToolTip(`llm-cost-monitor — ${formatted} today`)
+    const alertWord = openCount === 1 ? 'alert' : 'alerts'
+    const tip = hasAlerts
+      ? `devbar — ${openCount} ${alertWord} (${cost} today)`
+      : `devbar — ${cost} today`
+    tray.setToolTip(tip)
   }
 }
+
+// Backwards-compatible alias used by older call sites.
+const updateTrayTitle = updateTrayPresentation
 
 void app.whenReady().then(async () => {
   if (process.platform === 'darwin') {
@@ -175,9 +225,27 @@ void app.whenReady().then(async () => {
   providers = new ProviderRegistry({ pricing, events, fileCache })
   const settings = new SettingsStore(path.join(app.getPath('userData'), 'settings.json'))
 
+  // Exports today's spend to a JSON file the Claude Code statusline
+  // command (bin/devbar-statusline.js) reads. Re-flushed every refresh
+  // tick — see `runRefresh` below.
+  const statuslineExporter = new StatuslineExporter(app.getPath('userData'), aggregator)
+
   const authRepo = new AuthRepository(pool)
   const keychain = new KeychainStore()
   const auth = new AuthService({ repo: authRepo, keychain })
+
+  const alertRepo = new AlertRepository(pool)
+  alerts = alertRepo
+  const notifier = new AlertNotifier(settings)
+  const sampler = new AlertSampler(alertRepo, aggregator, settings, {
+    onRaise: (raises) => notifier.fire(raises),
+    onAnyChange: () => {
+      broadcastAlertsUpdated()
+      // Re-paint the tray on every alert mutation so the count stays live
+      // without requiring the user to open the dropdown.
+      void updateTrayPresentation()
+    },
+  })
 
   // Cross-node sync. Queue is initialised even when sync is disabled so the
   // status IPC works (returns nodeId, no traffic). The transport is only
@@ -218,6 +286,7 @@ void app.whenReady().then(async () => {
     providers,
     settings,
     auth,
+    alerts: alertRepo,
     syncQueue,
     fetchTeamOverview: async (teamId, token) => {
       const baseUrl = settings.get().teamSync.serverUrl
@@ -235,13 +304,13 @@ void app.whenReady().then(async () => {
   })
 
   const iconPath = getIconPath()
-  const icon = nativeImage.createFromPath(iconPath)
-  if (process.platform === 'darwin') icon.setTemplateImage(true)
-  tray = new Tray(icon)
+  baseTrayIcon = nativeImage.createFromPath(iconPath)
+  if (process.platform === 'darwin') baseTrayIcon.setTemplateImage(true)
+  tray = new Tray(baseTrayIcon)
   if (process.platform === 'darwin') {
     tray.setTitle('$0.00')
   } else {
-    tray.setToolTip('llm-cost-monitor')
+    tray.setToolTip('devbar')
   }
 
   dropdownWin = createDropdownWindow()
@@ -260,6 +329,10 @@ void app.whenReady().then(async () => {
             .join(', ')}; ${total} events stored`,
         )
         await updateTrayTitle()
+        // Best-effort write — statusline doesn't block the refresh path.
+        statuslineExporter.write().catch((err) => {
+          console.warn(`statusline export failed: ${(err as Error).message}`)
+        })
         broadcastUsageUpdated()
       } catch (err) {
         console.warn(`refresh ${label} failed: ${(err as Error).message}`)
@@ -273,6 +346,13 @@ void app.whenReady().then(async () => {
   // requiring a manual click. Interval is read from settings.json
   // (refreshIntervalMs); changes require a restart until the edit UI ships.
   setInterval(() => runRefresh('periodic'), settings.get().refreshIntervalMs)
+
+  // Start the alert sampler — runs every settings.alerts.samplingIntervalMs
+  // (default 30s), evaluates CPU/memory/cost thresholds, raises new alerts
+  // (deduped by signature), and fires OS notifications + ALERTS_UPDATED
+  // broadcasts when something changes.
+  sampler.start()
+  app.on('before-quit', () => sampler.stop())
 
   // Sync drain loop. Always armed — but the queue.drain() call is itself a
   // cheap no-op when sync is disabled or unconfigured. Runs at the user's

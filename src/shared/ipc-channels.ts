@@ -1,4 +1,5 @@
 import type { AggregateSnapshot } from './aggregates'
+import type { Alert, AlertFilter, AlertSummary } from './alerts'
 import type { AuthState } from './auth'
 import type { PlanInfo } from './plan-info'
 import type { AppSettings } from './settings'
@@ -25,11 +26,18 @@ export const IPC = {
   // renderer uses this to surface a "Open in browser" link from the tray.
   DASHBOARD_URL: 'dashboard:url',
   DASHBOARD_OPEN: 'dashboard:open',
+  ALERTS_LIST: 'alerts:list',
+  ALERTS_SUMMARY: 'alerts:summary',
+  ALERTS_ACK: 'alerts:ack',
+  ALERTS_RESOLVE: 'alerts:resolve',
+  ALERTS_SNOOZE: 'alerts:snooze',
+  ALERTS_RESOLVE_ALL: 'alerts:resolveAll',
 } as const
 
 export const EVENT = {
   USAGE_UPDATED: 'usage:updated',
   AUTH_STATE_CHANGED: 'auth:state-changed',
+  ALERTS_UPDATED: 'alerts:updated',
   SETTINGS_CHANGED: 'settings:changed',
   SYNC_STATUS_CHANGED: 'sync:status-changed',
 } as const
@@ -59,7 +67,7 @@ export interface ProviderRefreshResult {
   error: string | null
 }
 
-export type { AggregateSnapshot, AppSettings, AuthState, PlanInfo }
+export type { AggregateSnapshot, Alert, AlertFilter, AlertSummary, AppSettings, AuthState, PlanInfo }
 export type { SyncStatus, TeamSyncSettings, PrivacyLevel } from './sync'
 
 // Server-side aggregates surfaced to the renderer's Team tab.

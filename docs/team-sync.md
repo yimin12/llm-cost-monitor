@@ -54,11 +54,15 @@ buckets into `daily_aggregates`. No event-level ids ever leave the node.
 # 1. Make sure dev Postgres is up (the existing one — same container).
 npm run db:up
 
-# 2. Create the server database (one-time).
+# 2. Create the server database (one-time, only on a fresh data volume).
+#    docker-compose's db-init/01-create-team-sync-db.sql does this
+#    automatically for new volumes; established volumes need:
 docker exec llm-cost-monitor-postgres psql -U lcm -d postgres -c "CREATE DATABASE lcm_team_sync;"
 
-# 3. Apply server-side migrations.
-npm run server:migrate
+# 3. Apply migrations via the dockerized Prisma runner. Idempotent.
+#    See docs/db-migrations.md.
+npm run db:migrate:server     # only the server schema
+# (or `npm run db:migrate` for both schemas)
 
 # 4. Run the server.
 npm run server:dev   # listens on http://127.0.0.1:4017
