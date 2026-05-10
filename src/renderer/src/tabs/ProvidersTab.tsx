@@ -35,7 +35,7 @@ export function ProvidersTab({ agg, providers, dashboardUrl, settings }: {
             <path d="M21 3l-9 9" />
             <path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" />
           </svg>
-          Details
+          Provider Details
         </button>
       )}
 

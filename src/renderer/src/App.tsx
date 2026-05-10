@@ -366,7 +366,7 @@ export function App(): JSX.Element {
         )}
         {mountedTabs.has('team') && (
           <div hidden={activeTab !== 'team'}>
-            <TeamTab settings={settings} />
+            <TeamTab settings={settings} dashboardUrl={dashboardUrl} />
           </div>
         )}
         {mountedTabs.has('settings') && (

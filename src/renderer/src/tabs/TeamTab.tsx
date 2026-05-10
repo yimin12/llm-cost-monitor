@@ -14,7 +14,10 @@ function asBig(s: string): bigint {
   }
 }
 
-export function TeamTab({ settings }: { settings: AppSettings | null }): JSX.Element {
+export function TeamTab({ settings, dashboardUrl }: {
+  settings: AppSettings | null
+  dashboardUrl: string | null
+}): JSX.Element {
   const [overview, setOverview] = useState<TeamOverview | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -91,6 +94,23 @@ export function TeamTab({ settings }: { settings: AppSettings | null }): JSX.Ele
         </span>
         <span className="tab-context-sub">last 30d · {microToUsd(asBig(overview.totalCostMicroUsd))}</span>
       </section>
+
+      {dashboardUrl !== null && (
+        <button
+          type="button"
+          className="dashboard-link dashboard-link-block"
+          title={`Open the web view (${dashboardUrl})`}
+          onClick={() => void window.api.openDashboard()}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M14 3h7v7" />
+            <path d="M21 3l-9 9" />
+            <path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" />
+          </svg>
+          Team Details
+        </button>
+      )}
 
       <section className="settings-card">
         <div className="settings-card-head">
