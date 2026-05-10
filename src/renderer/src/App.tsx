@@ -18,7 +18,9 @@ import type {
 import type { PrivacyLevel } from '@shared/sync'
 
 import { AuthHeader } from './components/AuthHeader'
+import { Footer } from './components/Footer'
 import { PrivacyBanner } from './components/PrivacyBanner'
+import { LocaleProvider, useT } from './i18n/LocaleProvider'
 import { timeAgo } from './lib/format'
 import { useLenisScroll } from './lib/use-lenis-scroll'
 import { AlertsTab } from './tabs/AlertsTab'
@@ -27,6 +29,8 @@ import { ProvidersTab } from './tabs/ProvidersTab'
 import { SessionsTab } from './tabs/SessionsTab'
 import { SettingsTab } from './tabs/SettingsTab'
 import { TeamTab } from './tabs/TeamTab'
+
+import type { MessageKey } from '@shared/i18n/messages'
 
 declare global {
   interface Window {
@@ -72,10 +76,10 @@ declare global {
 }
 
 type TabId = 'overview' | 'providers' | 'sessions' | 'alerts' | 'team' | 'settings'
-const TABS: { id: TabId; label: string; icon: JSX.Element }[] = [
+const TABS: { id: TabId; labelKey: MessageKey; icon: JSX.Element }[] = [
   {
     id: 'overview',
-    label: 'Overview',
+    labelKey: 'tabOverview',
     icon: (
       <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
            strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -86,7 +90,7 @@ const TABS: { id: TabId; label: string; icon: JSX.Element }[] = [
   },
   {
     id: 'providers',
-    label: 'Providers',
+    labelKey: 'tabProviders',
     icon: (
       <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
            strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -96,7 +100,7 @@ const TABS: { id: TabId; label: string; icon: JSX.Element }[] = [
   },
   {
     id: 'sessions',
-    label: 'Sessions',
+    labelKey: 'tabSessions',
     icon: (
       <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
            strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -106,7 +110,7 @@ const TABS: { id: TabId; label: string; icon: JSX.Element }[] = [
   },
   {
     id: 'alerts',
-    label: 'Alerts',
+    labelKey: 'tabAlerts',
     icon: (
       <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
            strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -117,7 +121,7 @@ const TABS: { id: TabId; label: string; icon: JSX.Element }[] = [
   },
   {
     id: 'team',
-    label: 'Team',
+    labelKey: 'tabTeam',
     icon: (
       <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
            strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -130,7 +134,7 @@ const TABS: { id: TabId; label: string; icon: JSX.Element }[] = [
   },
   {
     id: 'settings',
-    label: 'Settings',
+    labelKey: 'tabSettings',
     icon: (
       <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
            strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -261,16 +265,32 @@ export function App(): JSX.Element {
     setMountedTabs((prev) => (prev.has(id) ? prev : new Set([...prev, id])))
   }, [])
 
+  // Wire locale state through the provider. The setter sends a
+  // SETTINGS_SET patch via IPC; the renderer subscription rebroadcasts
+  // the updated AppSettings, so this round-trips correctly without a
+  // local optimistic update.
+  const localeSetting = settings?.locale ?? 'auto'
+  const osLocale = typeof navigator !== 'undefined' ? navigator.language : 'en'
+  const setLocaleSetting = useCallback(
+    (next: AppSettings['locale']) => {
+      void window.api.setSettings({ locale: next })
+    },
+    [],
+  )
+
   if (agg === null) {
     return (
-      <div className="dropdown loading">
-        <div className="loader-pulse" />
-        <p>loading…</p>
-      </div>
+      <LocaleProvider setting={localeSetting} osLocale={osLocale} setSetting={setLocaleSetting}>
+        <div className="dropdown loading">
+          <div className="loader-pulse" />
+          <p>loading…</p>
+        </div>
+      </LocaleProvider>
     )
   }
 
   return (
+    <LocaleProvider setting={localeSetting} osLocale={osLocale} setSetting={setLocaleSetting}>
     <div className="dropdown" ref={dropdownRef}>
       <div className="aurora" aria-hidden />
 
@@ -311,7 +331,7 @@ export function App(): JSX.Element {
             aria-label="Refresh"
           >
             <span className={refreshing ? 'spin' : ''} aria-hidden>↻</span>
-            {refreshing ? 'refreshing' : 'refresh'}
+            <RefreshLabel refreshing={refreshing} />
           </button>
           <button
             type="button"
@@ -348,7 +368,7 @@ export function App(): JSX.Element {
                 {t.icon}
                 {badge > 0 && <span className="tab-badge">{badge}</span>}
               </span>
-              <span className="tab-tile-label">{t.label}</span>
+              <span className="tab-tile-label"><TabLabel k={t.labelKey} /></span>
             </button>
           )
         })}
@@ -394,6 +414,28 @@ export function App(): JSX.Element {
       </main>
 
       <PrivacyBanner />
+
+      <Footer
+        version={'0.0.1'}
+        refreshing={refreshing}
+        onRefresh={() => void handleRefresh()}
+        onQuit={() => void window.api.appQuit()}
+      />
     </div>
+    </LocaleProvider>
   )
+}
+
+// Translated tab label. Lives in its own tiny component so the rest of
+// App.tsx stays a flat render — and so the `useT()` consumer is inside
+// the LocaleProvider tree (App itself is the provider's parent).
+function TabLabel({ k }: { k: MessageKey }): JSX.Element {
+  const { t } = useT()
+  return <>{t(k)}</>
+}
+
+// Same pattern for the header refresh button.
+function RefreshLabel({ refreshing }: { refreshing: boolean }): JSX.Element {
+  const { t } = useT()
+  return <>{refreshing ? t('refreshing') : t('refresh')}</>
 }

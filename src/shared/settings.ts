@@ -2,6 +2,7 @@
 // on app start and mutated through SettingsStore.set(). Schema bumps go
 // through `schemaVersion`.
 
+import type { LocaleSetting } from './i18n/locales'
 import { DEFAULT_TEAM_SYNC, type TeamSyncSettings } from './sync'
 
 export const SETTINGS_SCHEMA_VERSION = 2
@@ -63,6 +64,9 @@ export interface AppSettings {
   // OS keychain via Electron `safeStorage` — flagged here as a known
   // gap, fine for local dev.
   providerCredentials: Record<string, ProviderCredential>
+  // UI language. 'auto' resolves to the OS locale at runtime — see
+  // src/shared/i18n/locales.ts.
+  locale: LocaleSetting
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -93,4 +97,5 @@ export const DEFAULT_SETTINGS: AppSettings = {
   teamSync: DEFAULT_TEAM_SYNC,
   planOverrides: {},
   providerCredentials: {},
+  locale: 'auto',
 }
