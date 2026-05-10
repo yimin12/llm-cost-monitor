@@ -1763,7 +1763,12 @@ body {
   background: transparent;
   border: 1px solid transparent;
   border-radius: 7px;
-  color: rgba(var(--fg), 0.78);
+  /* Footer icons sit on a fairly dark band (rgba 0,0,0,0.35 over the
+     panel base). Push the resting opacity high enough that the icons
+     read as "active controls" rather than "decorative chrome", but
+     keep them just shy of #fff so hover/focus still has somewhere to
+     go visually. */
+  color: rgba(var(--fg), 0.95);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -1771,22 +1776,23 @@ body {
   width: 28px;
   height: 28px;
   padding: 0;
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease, transform 120ms ease;
 }
 .footer-icon-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.10);
-  color: rgba(var(--fg), 1);
-  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.18);
 }
 .footer-icon-btn:active:not(:disabled) {
-  background: rgba(255, 255, 255, 0.06);
-  transform: scale(0.97);
+  background: rgba(255, 255, 255, 0.08);
+  transform: scale(0.96);
 }
-.footer-icon-btn:disabled { opacity: 0.4; cursor: progress; }
+.footer-icon-btn:disabled { opacity: 0.45; cursor: progress; }
 .footer-icon-glyph {
   display: inline-block;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1;
+  font-weight: 600;
 }
 .footer-icon-glyph.spin {
   animation: footer-spin 0.9s linear infinite;
