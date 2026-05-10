@@ -345,6 +345,9 @@ void app.whenReady().then(async () => {
         await setTeamPrivacyFloor({ baseUrl, teamId, accessToken: token }, level),
       )
     },
+    onAlertsChanged: () => {
+      void updateTrayPresentation()
+    },
   })
 
   // Best-effort silent restore — a stored refresh_token + active auth_user
