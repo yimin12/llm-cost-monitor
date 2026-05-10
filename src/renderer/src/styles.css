@@ -77,7 +77,9 @@ body {
   flex-direction: column;
   gap: 10px;
   height: 100%;
-  padding: 12px 14px 10px;
+  /* extra bottom padding reserves space for the absolutely-positioned
+     .tray-footer so scrolled content can't hide behind it. */
+  padding: 12px 14px 52px;
   width: 100%;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -1716,26 +1718,33 @@ body {
 }
 
 /* ───── Tray footer (version + refresh + language + quit) ─────
- * Sticky to the bottom of the dropdown's scroll area so the language
- * picker + refresh affordance is always reachable, even when the user
- * is scrolled deep into the Overview tab.
+ * Absolutely positioned at the bottom of the dropdown so the language
+ * picker + refresh affordance is always at the very bottom of the
+ * panel regardless of scroll position. We can't use position:sticky
+ * here — the Lenis inertia-scroll hook intercepts scroll events on
+ * the dropdown, so the browser's native sticky behaviour never fires.
+ * `.dropdown` is already position:relative so this anchors correctly,
+ * and the parent's padding-bottom (added below) reserves space so
+ * scrolled content never hides under the footer.
  */
 .tray-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 6px 8px;
-  margin-top: 4px;
-  border-top: 1px solid var(--hairline);
+  padding: 7px 10px;
   font-size: 10.5px;
-  color: rgba(var(--fg), 0.5);
-  position: sticky;
-  bottom: 0;
-  background: linear-gradient(180deg, rgba(var(--bg-base), 0.6), rgba(var(--bg-base), 0.97));
-  z-index: 5;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  color: rgba(var(--fg), 0.55);
+  position: absolute;
+  bottom: 8px;
+  left: 12px;
+  right: 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: rgba(20, 22, 30, 0.92);
+  z-index: 10;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
 }
 .tray-footer-version {
   font-family: 'SF Mono', ui-monospace, Menlo, Monaco, monospace;

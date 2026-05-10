@@ -322,27 +322,11 @@ export function App(): JSX.Element {
             <span>live · {timeAgo(agg.generatedAt)} ago</span>
           </span>
         </div>
-        <div className="header-actions">
-          <button
-            type="button"
-            className="refresh-btn"
-            disabled={refreshing}
-            onClick={() => void handleRefresh()}
-            aria-label="Refresh"
-          >
-            <span className={refreshing ? 'spin' : ''} aria-hidden>↻</span>
-            <RefreshLabel refreshing={refreshing} />
-          </button>
-          <button
-            type="button"
-            className="quit-btn"
-            title="Quit devbar"
-            aria-label="Quit"
-            onClick={() => void window.api.appQuit()}
-          >
-            ⏻
-          </button>
-        </div>
+        {/* Header used to host duplicate refresh + quit affordances; both
+            now live in the always-visible <Footer/> at the bottom of the
+            panel. Empty placeholder keeps the .dropdown-header flex
+            justify-content: space-between layout balanced. */}
+        <div className="header-actions" aria-hidden />
       </header>
 
       <AuthHeader />
