@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { AggregateSnapshot } from '@shared/aggregates'
 import type {
-  AppSettings,
   PricingInfo,
   ProviderListEntry,
   StorageInfo,
@@ -59,7 +58,6 @@ export function WebDashboard(): JSX.Element {
   const [pricing, setPricing] = useState<PricingInfo | null>(null)
   const [storage, setStorage] = useState<StorageInfo | null>(null)
   const [providers, setProviders] = useState<ProviderListEntry[]>([])
-  const [settings, setSettings] = useState<AppSettings | null>(null)
   const [teamOverview, setTeamOverview] = useState<TeamOverview | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [period, setPeriod] = useState<Period>(loadInitialPeriod)
@@ -75,7 +73,6 @@ export function WebDashboard(): JSX.Element {
     setAgg(a)
     setStorage(s)
     setProviders(ps)
-    setSettings(st)
     // Team sync overview is best-effort: fetch if configured, swallow
     // errors, leave the section hidden when null. Don't block the rest
     // of the dashboard on a slow/unreachable team backend.
@@ -516,86 +513,40 @@ export function WebDashboard(): JSX.Element {
           )}
         </section>
 
-        {/* Provider Details */}
+        {/* Sources */}
         <section className="web-card">
           <header className="web-card-head">
             <div>
-              <h2>Provider Details</h2>
+              <h2>Sources</h2>
               <p>
                 {providers.filter((p) => p.isAvailable).length} of {providers.length} providers
                 detected on this machine.
               </p>
             </div>
           </header>
-          <ul className="web-providers-grid">
+          <ul className="web-sources-grid">
             {providers.map((p) => {
               const lastSeen = agg.providerLastSeen[p.id]
-              const today = agg.byProviderToday.find((r) => r.provider === p.id)
-              const last30d = agg.byProvider30d.find((r) => r.provider === p.id)
-              const override = settings?.planOverrides?.[p.id]?.trim()
-              const useOverride = override !== undefined && override.length > 0
-              const mode = useOverride ? 'subscription' : p.plan.authMode
-              const planLabel = useOverride
-                ? `Plan: ${override}`
-                : p.plan.authMode === 'subscription'
-                  ? `Plan: ${p.plan.planName ?? 'Subscription'}`
-                  : p.plan.authMode === 'oauth'
-                    ? (p.plan.planName ?? 'OAuth')
-                    : p.plan.authMode === 'apiKey'
-                      ? 'API Calling'
-                      : p.plan.authMode === 'none'
-                        ? 'no auth'
-                        : 'unknown'
               return (
-                <li key={p.id} className="web-provider-card" data-available={p.isAvailable}>
-                  <header className="web-provider-head">
-                    <span
-                      className="web-source-icon"
-                      style={{ background: providerColor(p.id) }}
-                      aria-hidden
-                    >
-                      {providerName(p.id).charAt(0)}
+                <li key={p.id} className="web-source-card" data-available={p.isAvailable}>
+                  <span
+                    className="web-source-icon"
+                    style={{ background: providerColor(p.id) }}
+                    aria-hidden
+                  >
+                    {providerName(p.id).charAt(0)}
+                  </span>
+                  <div className="web-source-id">
+                    <span className="web-source-name">{p.name}</span>
+                    <span className="web-source-sub">
+                      {typeof lastSeen === 'number'
+                        ? `last seen ${timeAgo(lastSeen)} ago`
+                        : 'no events captured yet'}
                     </span>
-                    <div className="web-source-id">
-                      <span className="web-source-name">{p.name}</span>
-                      <span className="web-source-sub">
-                        {p.cliCommand !== null ? (
-                          <code className="web-cli-mono">{p.cliCommand}</code>
-                        ) : (
-                          providerName(p.id).toLowerCase()
-                        )}
-                      </span>
-                    </div>
-                    <span className={`plan-chip plan-${mode}`}>{planLabel}</span>
-                  </header>
-                  <dl className="web-provider-stats">
-                    <div>
-                      <dt>today</dt>
-                      <dd>{today ? microToUsd(today.costMicroUsd) : '—'}</dd>
-                      <dd className="web-provider-sub">{today?.eventCount ?? 0} calls</dd>
-                    </div>
-                    <div>
-                      <dt>30d</dt>
-                      <dd>{last30d ? microToUsd(last30d.costMicroUsd) : '—'}</dd>
-                      <dd className="web-provider-sub">{last30d?.eventCount ?? 0} calls</dd>
-                    </div>
-                    <div>
-                      <dt>last seen</dt>
-                      <dd className="web-provider-small">
-                        {typeof lastSeen === 'number' ? `${timeAgo(lastSeen)} ago` : '—'}
-                      </dd>
-                      <dd className="web-provider-sub">
-                        <span className="status-pill" data-state={p.isAvailable ? 'on' : 'off'}>
-                          {p.isAvailable ? 'detected' : 'no data'}
-                        </span>
-                      </dd>
-                    </div>
-                  </dl>
-                  {p.dashboardUrl !== null && (
-                    <a className="web-provider-link" href={p.dashboardUrl} target="_blank" rel="noreferrer">
-                      open provider dashboard ↗
-                    </a>
-                  )}
+                  </div>
+                  <span className="status-pill" data-state={p.isAvailable ? 'on' : 'off'}>
+                    {p.isAvailable ? 'detected' : 'no data'}
+                  </span>
                 </li>
               )
             })}
