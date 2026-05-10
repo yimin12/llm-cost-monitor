@@ -204,7 +204,7 @@ export function WebDashboard(): JSX.Element {
       <main className="web-main">
         <section className="web-page-head">
           <div>
-            <h1>Spend overview</h1>
+            <h1>Dashboard</h1>
             <p>
               Cost and token activity across your local CLI sessions. All data stays on this
               machine — nothing is sent anywhere.
