@@ -158,14 +158,14 @@ async function updateTrayPresentation(): Promise<void> {
   const usd = Number(snap.today.costMicroUsd) / 1_000_000
   const cost = `$${usd.toFixed(2)}`
 
-  // Live count of "actionable" alerts (open or acked-but-unresolved). Snoozed
-  // and resolved alerts don't pollute the tray. Falls back to 0 when the
-  // repo isn't ready yet — first refresh runs before app boot completes.
+  // Only critical alerts paint the tray. Warnings (high memory, daily-spend
+  // threshold, sub-budget forecast) live in the dropdown and never swap the
+  // icon or steal the title slot — see docs/alerts.md. Falls back to 0 when
+  // the repo isn't ready yet (first refresh runs before app boot completes).
   let openCount = 0
   if (alerts !== null) {
     try {
-      const summary = await alerts.summary()
-      openCount = summary.open + summary.acked
+      openCount = await alerts.openCriticalCount()
     } catch {
       // ignore — keep tray sane if the DB hiccups
     }

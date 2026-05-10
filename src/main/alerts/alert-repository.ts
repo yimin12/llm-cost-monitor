@@ -116,6 +116,17 @@ export class AlertRepository {
     return out
   }
 
+  // Count of alerts the tray should react to: actionable severity is
+  // 'critical', actionable status is open or acked (snoozed/resolved
+  // never paint the tray icon). Warnings are passive — they show up in
+  // the dropdown but the tray ignores them.
+  async openCriticalCount(): Promise<number> {
+    const r = await this.pool.query<{ n: bigint }>(
+      `SELECT COUNT(*)::bigint AS n FROM alerts WHERE severity = 'critical' AND status IN ('open','acked')`,
+    )
+    return Number(r.rows[0]?.n ?? 0n)
+  }
+
   async ack(id: string): Promise<void> {
     const q = namedQuery(
       `UPDATE alerts SET status = 'acked', acked_at = @now WHERE id = @id::uuid AND status IN ('open','snoozed')`,
