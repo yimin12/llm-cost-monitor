@@ -887,27 +887,28 @@ body {
   border-color: rgba(255, 255, 255, 0.2);
 }
 
+/* Privacy banner — pinned above the footer, *outside* the scroll
+ * container so it always stays at the bottom of the panel and never
+ * overlaps with scrolling content. Single-cohesive-block padding so
+ * the two privacy lines flow as plain text rather than getting split
+ * into a two-column flex layout (which previously produced "On-device
+ * only." stranded on the left while the rest wrapped on the right).
+ */
 .privacy {
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
+  flex: 0 0 auto;
   font-size: 10px;
   color: rgba(var(--fg), 0.55);
   line-height: 1.45;
-  /* Opaque card surface — was 6% green, which let aurora + content
-     bleed through and made the banner look like "background text"
-     rather than a discrete row. Same shade as the tray-footer/popover
-     so the bottom of the panel reads as one cohesive area. */
   background: rgba(18, 20, 26, 0.96);
-  border: 1px solid rgba(48, 209, 88, 0.18);
-  border-radius: 10px;
-  padding: 8px 10px;
-  flex-direction: column;
+  border-top: 1px solid rgba(48, 209, 88, 0.18);
+  padding: 7px 14px 8px;
 }
 .privacy-line {
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
+  display: block;
+  margin: 0;
+}
+.privacy-line + .privacy-line {
+  margin-top: 2px;
 }
 .privacy-line.subtle {
   color: rgba(var(--fg), 0.4);

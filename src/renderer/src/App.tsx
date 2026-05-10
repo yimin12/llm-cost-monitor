@@ -404,9 +404,9 @@ export function App(): JSX.Element {
           </div>
         )}
       </main>
+      </div>
 
       <PrivacyBanner />
-      </div>
 
       <Footer
         version={'0.0.1'}
