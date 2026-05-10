@@ -291,9 +291,10 @@ export function App(): JSX.Element {
 
   return (
     <LocaleProvider setting={localeSetting} osLocale={osLocale} setSetting={setLocaleSetting}>
-    <div className="dropdown" ref={dropdownRef}>
+    <div className="dropdown">
       <div className="aurora" aria-hidden />
 
+      <div className="dropdown-scroll" ref={dropdownRef}>
       <header className="dropdown-header">
         <div className="title-block">
           <span className="title-glyph" aria-hidden>
@@ -398,6 +399,7 @@ export function App(): JSX.Element {
       </main>
 
       <PrivacyBanner />
+      </div>
 
       <Footer
         version={'0.0.1'}

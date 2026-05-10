@@ -64,6 +64,12 @@ body {
  *      bounded to its own subtree instead of forcing a panel-wide
  *      relayout per scroll tick.
  */
+/* Outer panel: holds the background, the scroll area, and a pinned
+ * footer as siblings. No overflow here — `.dropdown-scroll` does the
+ * scrolling. This keeps the footer permanently anchored at the bottom
+ * of the visible panel regardless of scroll position (and side-steps
+ * the Lenis-vs-sticky incompatibility).
+ */
 .dropdown {
   position: relative;
   isolation: isolate;
@@ -75,15 +81,22 @@ body {
   color: rgb(var(--fg));
   display: flex;
   flex-direction: column;
-  gap: 10px;
   height: 100%;
-  /* extra bottom padding reserves space for the absolutely-positioned
-     .tray-footer so scrolled content can't hide behind it. */
-  padding: 12px 14px 52px;
   width: 100%;
+  font-size: 12px;
+  box-shadow:
+    0 16px 48px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.dropdown-scroll {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  font-size: 12px;
+  padding: 12px 14px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   /* Promote to its own compositor layer so scrolling doesn't repaint
      the menubar's host window. translateZ(0) is the canonical incantation;
      `will-change: scroll-position` tells Chromium specifically that
@@ -91,9 +104,6 @@ body {
      recalc on each frame. */
   transform: translateZ(0);
   will-change: scroll-position;
-  box-shadow:
-    0 16px 48px rgba(0, 0, 0, 0.55),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .aurora {
@@ -121,14 +131,14 @@ body {
   filter: blur(28px);
 }
 
-.dropdown::-webkit-scrollbar {
+.dropdown-scroll::-webkit-scrollbar {
   width: 6px;
 }
-.dropdown::-webkit-scrollbar-thumb {
+.dropdown-scroll::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.08);
   border-radius: 3px;
 }
-.dropdown::-webkit-scrollbar-track { background: transparent; }
+.dropdown-scroll::-webkit-scrollbar-track { background: transparent; }
 
 .dropdown.loading {
   align-items: center;
@@ -1718,33 +1728,26 @@ body {
 }
 
 /* ───── Tray footer (version + refresh + language + quit) ─────
- * Absolutely positioned at the bottom of the dropdown so the language
- * picker + refresh affordance is always at the very bottom of the
- * panel regardless of scroll position. We can't use position:sticky
- * here — the Lenis inertia-scroll hook intercepts scroll events on
- * the dropdown, so the browser's native sticky behaviour never fires.
- * `.dropdown` is already position:relative so this anchors correctly,
- * and the parent's padding-bottom (added below) reserves space so
- * scrolled content never hides under the footer.
+ * Sibling of .dropdown-scroll inside .dropdown — the outer panel is
+ * a flex column where the scroll area takes the middle (flex: 1) and
+ * the footer takes its natural height at the bottom. This means the
+ * footer is *outside* the scroll area entirely, so scrolling the
+ * content has zero effect on the footer's position.
  */
 .tray-footer {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 7px 10px;
+  padding: 8px 14px;
   font-size: 10.5px;
   color: rgba(var(--fg), 0.55);
-  position: absolute;
-  bottom: 8px;
-  left: 12px;
-  right: 12px;
-  border: 1px solid var(--hairline);
-  border-radius: 10px;
-  background: rgba(20, 22, 30, 0.92);
-  z-index: 10;
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  border-top: 1px solid var(--hairline);
+  background: rgba(var(--bg-base), 0.94);
+  /* Round only the bottom corners so the footer's bottom edge follows
+     the panel's rounded border. */
+  border-radius: 0 0 16px 16px;
 }
 .tray-footer-version {
   font-family: 'SF Mono', ui-monospace, Menlo, Monaco, monospace;
