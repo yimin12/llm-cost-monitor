@@ -1,11 +1,11 @@
-import { app, Tray, BrowserWindow, nativeImage, screen } from 'electron'
+import { app, Tray, BrowserWindow, screen } from 'electron'
 import path from 'path'
 
 import { Aggregator } from './aggregation/aggregator'
 import { AlertRepository } from './alerts/alert-repository'
 import { AlertNotifier } from './alerts/notifier'
 import { AlertSampler } from './alerts/sampler'
-import { getAlertTrayIcon } from './tray-icons'
+import { getAlertTrayIcon, getBaseTrayIcon } from './tray-icons'
 import { AuthRepository } from './auth/auth-repository'
 import { AuthService } from './auth/auth-service'
 import { KeychainStore } from './auth/keychain-store'
@@ -69,14 +69,6 @@ function manageToIpc<T>(r: ManageResult<T>): TeamManageResult {
 // hits the network. Renderer surfaces it the same as a backend 0 error.
 function manageOff(): TeamManageResult {
   return { ok: false, status: 0, error: 'sync_off', message: 'team sync is off' }
-}
-
-function getIconPath(): string {
-  return path.join(
-    app.isPackaged
-      ? path.join(process.resourcesPath, 'icons', 'tray-Template.png')
-      : path.join(__dirname, '../../resources/icons/tray-Template.png'),
-  )
 }
 
 interface Bounds {
@@ -358,9 +350,7 @@ void app.whenReady().then(async () => {
     void pool?.end().catch(() => {})
   })
 
-  const iconPath = getIconPath()
-  baseTrayIcon = nativeImage.createFromPath(iconPath)
-  if (process.platform === 'darwin') baseTrayIcon.setTemplateImage(true)
+  baseTrayIcon = getBaseTrayIcon()
   tray = new Tray(baseTrayIcon)
   if (process.platform === 'darwin') {
     tray.setTitle('$0.00')
