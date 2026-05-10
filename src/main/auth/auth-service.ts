@@ -35,11 +35,13 @@ export class AuthService {
     this.secrets = loadAuthSecrets()
     if (this.secrets === null) {
       console.warn(
-        'auth: no GCP credentials in ~/.env (need GCP_CLIENTID); sign-in disabled',
+        'auth: no GCP credentials configured (set BUNDLED_GOOGLE_OAUTH ' +
+          'in src/shared/oauth-config.ts, or GCP_CLIENTID in ~/.env); ' +
+          'sign-in disabled',
       )
     } else {
       console.log(
-        `auth: GCP credentials loaded (client_id starts with ${this.secrets.gcpClientId.slice(0, 8)}…, secret in .env: ${this.secrets.gcpClientSecret === null ? 'no' : 'yes'})`,
+        `auth: GCP credentials loaded (client_id starts with ${this.secrets.gcpClientId.slice(0, 8)}…, secret: ${this.secrets.gcpClientSecret === null ? 'none' : 'yes'}, source: ${this.secrets.source})`,
       )
     }
   }
