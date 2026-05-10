@@ -205,6 +205,17 @@ export function installBrowserStub(): void {
         ...cachedSettings,
         ...patch,
         teamSync: { ...cachedSettings.teamSync, ...(patch.teamSync ?? {}) },
+        // Match SettingsStore.set's shallow-per-provider merge so the
+        // browser preview can demo the provider catalog form without
+        // wiping other providers' creds.
+        providerCredentials: {
+          ...cachedSettings.providerCredentials,
+          ...(patch.providerCredentials ?? {}),
+        },
+        planOverrides: {
+          ...cachedSettings.planOverrides,
+          ...(patch.planOverrides ?? {}),
+        },
       }
       return cachedSettings
     },
@@ -282,9 +293,5 @@ export function installBrowserStub(): void {
     teamRevokeMember: async () => ({ ok: false, status: 0, error: 'browser_stub' }),
     teamSetMemberRole: async () => ({ ok: false, status: 0, error: 'browser_stub' }),
     teamSetPrivacyFloor: async () => ({ ok: false, status: 0, error: 'browser_stub' }),
-    providerKeyList: async (ids: string[]) =>
-      ids.map((id) => ({ providerId: id, configured: false, encryptionAvailable: false, addedAt: null })),
-    providerKeySet: async () => ({ ok: false, error: 'browser_stub' }),
-    providerKeyDelete: async () => ({ ok: false, error: 'browser_stub' }),
   }
 }

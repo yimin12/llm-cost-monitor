@@ -30,6 +30,14 @@ export interface AlertSettings {
   notifications: boolean
 }
 
+export interface ProviderCredential {
+  apiKey: string
+  // Wall-clock at which the user last edited this credential. Used by
+  // the UI for "added Xm ago" labels and a future "rotate every N days"
+  // reminder.
+  updatedAt: number
+}
+
 export interface AppSettings {
   schemaVersion: number
   refreshIntervalMs: number
@@ -46,24 +54,15 @@ export interface AppSettings {
   // subscription state. Empty string / missing key = fall through to
   // the detected plan.
   planOverrides: Record<string, string>
-  // Provider catalog API keys. Keyed by catalog entry id (see
-  // src/shared/provider-catalog.ts). Values are *encrypted* via Electron
-  // safeStorage when available — the renderer never sees the plaintext.
-  // The encrypted blob is base64-encoded so it round-trips through JSON.
-  providerApiKeys: Record<string, ProviderApiKeyEntry>
-}
-
-export interface ProviderApiKeyEntry {
-  // Base64 of safeStorage.encryptString(plaintextKey). On platforms
-  // without OS-level keychain (some Linux configurations) safeStorage
-  // falls back to plain encryption; we still treat the value as
-  // sensitive and never echo it back to the renderer.
-  ciphertextB64: string
-  // True when safeStorage reported encryption is unavailable at write
-  // time. Lets the UI warn the user that their key is only obfuscated.
-  encryptionAvailable: boolean
-  // Human-readable timestamp for the catalog UI.
-  addedAt: number
+  // User-supplied credentials for providers devbar doesn't yet
+  // auto-detect (Grok, DeepSeek, Doubao, Kimi, etc. — see
+  // src/shared/provider-catalog.ts). Keyed by provider id.
+  //
+  // Storage caveat: today this lives in the same userData/settings.json
+  // as everything else. Production should migrate apiKey storage to the
+  // OS keychain via Electron `safeStorage` — flagged here as a known
+  // gap, fine for local dev.
+  providerCredentials: Record<string, ProviderCredential>
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -93,5 +92,5 @@ export const DEFAULT_SETTINGS: AppSettings = {
   },
   teamSync: DEFAULT_TEAM_SYNC,
   planOverrides: {},
-  providerApiKeys: {},
+  providerCredentials: {},
 }

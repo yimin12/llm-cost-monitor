@@ -1,21 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 import type {
   AppSettings,
   PricingInfo,
   PrivacyLevel,
-  ProviderKeyStatus,
   ProviderListEntry,
   StorageInfo,
   SyncStatus,
 } from '@shared/ipc-channels'
-import {
-  CATEGORY_LABELS,
-  CATEGORY_ORDER,
-  PROVIDER_CATALOG,
-  entriesByCategory,
-  type CatalogEntry,
-} from '@shared/provider-catalog'
 
 import { providerColor, providerName, timeAgo } from '../lib/format'
 
@@ -109,8 +101,6 @@ export function SettingsTab({
       </section>
 
       <PlanOverrideCard providers={providers} settings={settings} />
-
-      <ProviderCatalogCard />
 
       <section className="settings-card about-card">
         <div className="settings-card-head">
@@ -346,210 +336,5 @@ function PlanOverrideCard({
         })}
       </div>
     </section>
-  )
-}
-
-// ── Provider catalog card ──────────────────────────────────────────
-// Lists every entry in PROVIDER_CATALOG grouped by category. Each row
-// surfaces whether a key is configured (chip), an inline input to add
-// or replace the key, and a remove button. The renderer never sees the
-// plaintext after submit — main process encrypts via safeStorage and
-// returns only a status object.
-
-function ProviderCatalogCard(): JSX.Element {
-  const grouped = useMemo(() => entriesByCategory(), [])
-  const allIds = useMemo(() => PROVIDER_CATALOG.map((e) => e.id), [])
-  const [statuses, setStatuses] = useState<Record<string, ProviderKeyStatus>>({})
-  const [toast, setToast] = useState<string | null>(null)
-
-  const reload = useCallback(async () => {
-    const list = await window.api.providerKeyList(allIds)
-    const m: Record<string, ProviderKeyStatus> = {}
-    for (const s of list) m[s.providerId] = s
-    setStatuses(m)
-  }, [allIds])
-
-  useEffect(() => {
-    void reload()
-  }, [reload])
-
-  const flashToast = useCallback((msg: string) => {
-    setToast(msg)
-    setTimeout(() => setToast(null), 3000)
-  }, [])
-
-  return (
-    <section className="settings-card">
-      <div className="settings-card-head">
-        <h3>Provider Catalog</h3>
-        <span className="enabled-dot on" />
-      </div>
-      <p className="settings-help">
-        Add API keys for providers that aren't auto-detected from local CLI logs.
-        Keys are stored encrypted on this device via the OS keychain (safeStorage)
-        — never uploaded.
-      </p>
-      {toast !== null && <div className="catalog-toast" role="status">{toast}</div>}
-      {CATEGORY_ORDER.map((cat) => {
-        const entries = grouped[cat]
-        if (entries.length === 0) return null
-        return (
-          <div key={cat} className="catalog-group">
-            <h4 className="catalog-group-title">{CATEGORY_LABELS[cat]}</h4>
-            <ul className="catalog-list">
-              {entries.map((e) => (
-                <CatalogRow
-                  key={e.id}
-                  entry={e}
-                  status={statuses[e.id] ?? null}
-                  onSaved={(msg) => {
-                    flashToast(msg)
-                    void reload()
-                  }}
-                />
-              ))}
-            </ul>
-          </div>
-        )
-      })}
-    </section>
-  )
-}
-
-function CatalogRow({
-  entry,
-  status,
-  onSaved,
-}: {
-  entry: CatalogEntry
-  status: ProviderKeyStatus | null
-  onSaved: (msg: string) => void
-}): JSX.Element {
-  const [editing, setEditing] = useState(false)
-  const [value, setValue] = useState('')
-  const [busy, setBusy] = useState(false)
-  const configured = status?.configured === true
-
-  const submit = async (): Promise<void> => {
-    if (value.trim().length === 0) return
-    setBusy(true)
-    try {
-      const r = await window.api.providerKeySet(entry.id, value)
-      if (r.ok) {
-        onSaved(`${entry.name}: saved`)
-        setValue('')
-        setEditing(false)
-      } else {
-        onSaved(`${entry.name} failed: ${r.message ?? r.error}`)
-      }
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const remove = async (): Promise<void> => {
-    setBusy(true)
-    try {
-      const r = await window.api.providerKeyDelete(entry.id)
-      if (r.ok) {
-        onSaved(`${entry.name}: removed`)
-      } else {
-        onSaved(`${entry.name} failed: ${r.message ?? r.error}`)
-      }
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <li className="catalog-row" data-configured={configured}>
-      <div className="catalog-row-head">
-        <div className="catalog-row-id">
-          <span className="catalog-row-name">{entry.name}</span>
-          <span className="catalog-row-desc">{entry.description}</span>
-        </div>
-        <span
-          className={`catalog-key-chip ${configured ? 'on' : 'off'}`}
-          title={
-            configured && status?.encryptionAvailable === false
-              ? 'Stored, but OS keychain unavailable — key is only obfuscated.'
-              : configured
-                ? 'API key configured (encrypted)'
-                : 'No API key configured'
-          }
-        >
-          {configured ? 'key set' : 'no key'}
-        </span>
-      </div>
-      <div className="catalog-row-actions">
-        <a className="catalog-link" href={entry.apiKeyHelpUrl} target="_blank" rel="noreferrer">
-          get key ↗
-        </a>
-        {entry.websiteUrl !== undefined && (
-          <a className="catalog-link dim" href={entry.websiteUrl} target="_blank" rel="noreferrer">
-            website ↗
-          </a>
-        )}
-        {!editing && (
-          <button
-            type="button"
-            className="catalog-action"
-            onClick={() => setEditing(true)}
-            disabled={busy}
-          >
-            {configured ? 'replace key' : 'add API key'}
-          </button>
-        )}
-        {configured && !editing && (
-          <button
-            type="button"
-            className="catalog-action danger"
-            onClick={() => void remove()}
-            disabled={busy}
-          >
-            remove
-          </button>
-        )}
-      </div>
-      {editing && (
-        <form
-          className="catalog-form"
-          onSubmit={(e) => {
-            e.preventDefault()
-            void submit()
-          }}
-        >
-          <input
-            type="password"
-            className="catalog-input"
-            placeholder={entry.apiKeyPlaceholder}
-            value={value}
-            onChange={(ev) => setValue(ev.currentTarget.value)}
-            autoFocus
-            disabled={busy}
-            autoComplete="off"
-            spellCheck={false}
-          />
-          <button
-            type="submit"
-            className="catalog-action primary"
-            disabled={busy || value.trim().length === 0}
-          >
-            confirm
-          </button>
-          <button
-            type="button"
-            className="catalog-action"
-            disabled={busy}
-            onClick={() => {
-              setEditing(false)
-              setValue('')
-            }}
-          >
-            cancel
-          </button>
-        </form>
-      )}
-    </li>
   )
 }

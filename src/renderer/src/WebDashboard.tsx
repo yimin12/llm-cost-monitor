@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { AggregateSnapshot } from '@shared/aggregates'
 import type {
+  AppSettings,
   PricingInfo,
   ProviderListEntry,
   StorageInfo,
@@ -9,6 +10,7 @@ import type {
 } from '@shared/ipc-channels'
 
 import { AreaChart, Donut, ShareBar, useAnimatedNumber } from './components/charts'
+import { ProviderCatalog } from './components/ProviderCatalog'
 import {
   formatDuration,
   formatTokens,
@@ -58,6 +60,7 @@ export function WebDashboard(): JSX.Element {
   const [pricing, setPricing] = useState<PricingInfo | null>(null)
   const [storage, setStorage] = useState<StorageInfo | null>(null)
   const [providers, setProviders] = useState<ProviderListEntry[]>([])
+  const [settings, setSettings] = useState<AppSettings | null>(null)
   const [teamOverview, setTeamOverview] = useState<TeamOverview | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [period, setPeriod] = useState<Period>(loadInitialPeriod)
@@ -73,6 +76,7 @@ export function WebDashboard(): JSX.Element {
     setAgg(a)
     setStorage(s)
     setProviders(ps)
+    setSettings(st)
     // Team sync overview is best-effort: fetch if configured, swallow
     // errors, leave the section hidden when null. Don't block the rest
     // of the dashboard on a slow/unreachable team backend.
@@ -98,8 +102,14 @@ export function WebDashboard(): JSX.Element {
 
   useEffect(() => {
     void window.api.pricingInfo().then(setPricing)
+    void window.api.settings().then(setSettings)
     void reload()
-    return window.api.onUsageUpdated(scheduleReload)
+    const offUsage = window.api.onUsageUpdated(scheduleReload)
+    const offSettings = window.api.onSettingsChanged(setSettings)
+    return () => {
+      offUsage()
+      offSettings()
+    }
   }, [reload, scheduleReload])
 
   useEffect(() => {
@@ -221,7 +231,7 @@ export function WebDashboard(): JSX.Element {
       <main className="web-main">
         <section className="web-page-head">
           <div>
-            <h1>Spend overview</h1>
+            <h1>Dashboard</h1>
             <p>
               Cost and token activity across your local CLI sessions. All data stays on this
               machine — nothing is sent anywhere.
@@ -513,45 +523,12 @@ export function WebDashboard(): JSX.Element {
           )}
         </section>
 
-        {/* Sources */}
-        <section className="web-card">
-          <header className="web-card-head">
-            <div>
-              <h2>Sources</h2>
-              <p>
-                {providers.filter((p) => p.isAvailable).length} of {providers.length} providers
-                detected on this machine.
-              </p>
-            </div>
-          </header>
-          <ul className="web-sources-grid">
-            {providers.map((p) => {
-              const lastSeen = agg.providerLastSeen[p.id]
-              return (
-                <li key={p.id} className="web-source-card" data-available={p.isAvailable}>
-                  <span
-                    className="web-source-icon"
-                    style={{ background: providerColor(p.id) }}
-                    aria-hidden
-                  >
-                    {providerName(p.id).charAt(0)}
-                  </span>
-                  <div className="web-source-id">
-                    <span className="web-source-name">{p.name}</span>
-                    <span className="web-source-sub">
-                      {typeof lastSeen === 'number'
-                        ? `last seen ${timeAgo(lastSeen)} ago`
-                        : 'no events captured yet'}
-                    </span>
-                  </div>
-                  <span className="status-pill" data-state={p.isAvailable ? 'on' : 'off'}>
-                    {p.isAvailable ? 'detected' : 'no data'}
-                  </span>
-                </li>
-              )
-            })}
-          </ul>
-        </section>
+        {/* Provider catalog — full vendor list with capability filter +
+            inline onboarding form. Replaces the simple Sources grid;
+            shows everything devbar can talk to today (auto-detected or
+            via API key) plus the wider catalog of vendors users may
+            want to onboard. */}
+        <ProviderCatalog detectedProviders={providers} settings={settings} />
 
         {/* Team Details — always rendered. Empty state when sync is off
             so users who clicked the tray "Team Details" button always

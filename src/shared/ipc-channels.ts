@@ -27,11 +27,6 @@ export const IPC = {
   TEAM_REVOKE_MEMBER: 'team:revoke-member',
   TEAM_SET_MEMBER_ROLE: 'team:set-member-role',
   TEAM_SET_PRIVACY_FLOOR: 'team:set-privacy-floor',
-  // Provider catalog API key management. Keys are encrypted at rest
-  // via Electron safeStorage; the renderer never sees plaintext.
-  PROVIDER_KEY_LIST: 'provider-key:list',
-  PROVIDER_KEY_SET: 'provider-key:set',
-  PROVIDER_KEY_DELETE: 'provider-key:delete',
   // Returns the dev-server URL that the same renderer is served at, or null
   // in production builds where the renderer is loaded via file://. The
   // renderer uses this to surface a "Open in browser" link from the tray.
@@ -128,20 +123,6 @@ export interface TeamNodeStatus {
 export type TeamManageResult =
   | { ok: true }
   | { ok: false; status: number; error: string; message?: string }
-
-// Slim view of the provider key store for the renderer. Plaintext is
-// NEVER sent — the renderer only learns whether a key is configured
-// and when it was added.
-export interface ProviderKeyStatus {
-  providerId: string
-  configured: boolean
-  encryptionAvailable: boolean
-  addedAt: number | null
-}
-
-export type ProviderKeyResult =
-  | { ok: true; status: ProviderKeyStatus }
-  | { ok: false; error: string; message?: string }
 
 export interface TeamOverview {
   teamId: string
