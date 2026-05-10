@@ -834,10 +834,11 @@ body {
   cursor: progress;
 }
 /* ── Inline variant: renders the AuthHeader inside .dropdown-header
- *    next to the brand instead of as its own card. Tighter sizing
- *    + no card chrome so it visually merges with the title row.
- *    Email truncates; name is hidden to save horizontal space (still
- *    available via the title attribute on hover).
+ *    next to the brand. Strips the card chrome so it visually merges
+ *    with the title row, and *hides* the name + email entirely —
+ *    only the avatar + Sign-out button render. The avatar's title
+ *    attribute (set in AuthHeader.tsx) surfaces email/name on hover.
+ *    Keeps the row genuinely uncluttered at the 390px panel width.
  */
 .auth-header.auth-header-inline {
   padding: 0;
@@ -846,9 +847,8 @@ body {
   border-radius: 0;
   min-height: 0;
   gap: 6px;
-  flex: 1 1 auto;
-  min-width: 0;
-  justify-content: flex-end;
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 .auth-header.auth-header-inline.signed-in {
   background: transparent;
@@ -863,19 +863,12 @@ body {
   font-size: 11px;
 }
 .auth-header.auth-header-inline .auth-identity {
-  flex: 0 1 auto;
-  min-width: 0;
-}
-.auth-header.auth-header-inline .auth-name {
   display: none;
 }
-.auth-header.auth-header-inline .auth-email {
-  font-size: 10.5px;
-  max-width: 140px;
-}
 .auth-header.auth-header-inline .auth-btn {
-  font-size: 10px;
-  padding: 3px 9px;
+  font-size: 10.5px;
+  padding: 3px 10px;
+  white-space: nowrap;
 }
 
 .auth-btn-primary {

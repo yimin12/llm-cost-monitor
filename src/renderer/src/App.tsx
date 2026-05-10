@@ -330,7 +330,7 @@ export function App(): JSX.Element {
           <span className="title">devbar</span>
           <span className="live-pill" title={`updated ${timeAgo(agg.generatedAt)} ago`}>
             <span className="live-dot" />
-            <span>live · {timeAgo(agg.generatedAt)} ago</span>
+            <span>{timeAgo(agg.generatedAt)}</span>
           </span>
         </div>
         {/* AuthHeader sits inline with the brand instead of taking its
