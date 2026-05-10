@@ -1,11 +1,11 @@
-import { app, Tray, BrowserWindow, nativeImage, screen } from 'electron'
+import { app, Tray, BrowserWindow, screen } from 'electron'
 import path from 'path'
 
 import { Aggregator } from './aggregation/aggregator'
 import { AlertRepository } from './alerts/alert-repository'
 import { AlertNotifier } from './alerts/notifier'
 import { AlertSampler } from './alerts/sampler'
-import { getAlertTrayIcon } from './tray-icons'
+import { getAlertTrayIcon, getBaseTrayIcon } from './tray-icons'
 import { AuthRepository } from './auth/auth-repository'
 import { AuthService } from './auth/auth-service'
 import { KeychainStore } from './auth/keychain-store'
@@ -69,14 +69,6 @@ function manageToIpc<T>(r: ManageResult<T>): TeamManageResult {
 // hits the network. Renderer surfaces it the same as a backend 0 error.
 function manageOff(): TeamManageResult {
   return { ok: false, status: 0, error: 'sync_off', message: 'team sync is off' }
-}
-
-function getIconPath(): string {
-  return path.join(
-    app.isPackaged
-      ? path.join(process.resourcesPath, 'icons', 'tray-Template.png')
-      : path.join(__dirname, '../../resources/icons/tray-Template.png'),
-  )
 }
 
 interface Bounds {
@@ -166,14 +158,14 @@ async function updateTrayPresentation(): Promise<void> {
   const usd = Number(snap.today.costMicroUsd) / 1_000_000
   const cost = `$${usd.toFixed(2)}`
 
-  // Live count of "actionable" alerts (open or acked-but-unresolved). Snoozed
-  // and resolved alerts don't pollute the tray. Falls back to 0 when the
-  // repo isn't ready yet — first refresh runs before app boot completes.
+  // Only critical alerts paint the tray. Warnings (high memory, daily-spend
+  // threshold, sub-budget forecast) live in the dropdown and never swap the
+  // icon or steal the title slot — see docs/alerts.md. Falls back to 0 when
+  // the repo isn't ready yet (first refresh runs before app boot completes).
   let openCount = 0
   if (alerts !== null) {
     try {
-      const summary = await alerts.summary()
-      openCount = summary.open + summary.acked
+      openCount = await alerts.openCriticalCount()
     } catch {
       // ignore — keep tray sane if the DB hiccups
     }
@@ -345,6 +337,9 @@ void app.whenReady().then(async () => {
         await setTeamPrivacyFloor({ baseUrl, teamId, accessToken: token }, level),
       )
     },
+    onAlertsChanged: () => {
+      void updateTrayPresentation()
+    },
   })
 
   // Best-effort silent restore — a stored refresh_token + active auth_user
@@ -355,9 +350,7 @@ void app.whenReady().then(async () => {
     void pool?.end().catch(() => {})
   })
 
-  const iconPath = getIconPath()
-  baseTrayIcon = nativeImage.createFromPath(iconPath)
-  if (process.platform === 'darwin') baseTrayIcon.setTemplateImage(true)
+  baseTrayIcon = getBaseTrayIcon()
   tray = new Tray(baseTrayIcon)
   if (process.platform === 'darwin') {
     tray.setTitle('$0.00')

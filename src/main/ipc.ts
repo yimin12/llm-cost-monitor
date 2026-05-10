@@ -63,6 +63,11 @@ export interface IpcDeps {
     accessToken: string | null,
     level: PrivacyLevel,
   ) => Promise<TeamManageResult>
+  // Repaint hook fired after a user-driven alert mutation (ack / resolve /
+  // snooze / resolve-all). The sampler already calls its own onAnyChange on
+  // automated raises; this covers the manual path so the tray icon and title
+  // can't stay stuck on the warning glyph after the dropdown shows ALL CLEAR.
+  onAlertsChanged: () => void
 }
 
 function teamSyncFromSettings(s: AppSettings): {
@@ -228,19 +233,23 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   ipcMain.handle(IPC.ALERTS_ACK, async (_e, id: string): Promise<void> => {
     await deps.alerts.ack(id)
     broadcastAlertsUpdated()
+    deps.onAlertsChanged()
   })
   ipcMain.handle(IPC.ALERTS_RESOLVE, async (_e, id: string): Promise<void> => {
     await deps.alerts.resolve(id)
     broadcastAlertsUpdated()
+    deps.onAlertsChanged()
   })
   ipcMain.handle(IPC.ALERTS_SNOOZE, async (_e, id: string): Promise<void> => {
     const minutes = deps.settings.get().alerts.snoozeMinutes
     await deps.alerts.snooze(id, Date.now() + minutes * 60_000)
     broadcastAlertsUpdated()
+    deps.onAlertsChanged()
   })
   ipcMain.handle(IPC.ALERTS_RESOLVE_ALL, async (): Promise<number> => {
     const n = await deps.alerts.resolveAll()
     broadcastAlertsUpdated()
+    deps.onAlertsChanged()
     return n
   })
 }

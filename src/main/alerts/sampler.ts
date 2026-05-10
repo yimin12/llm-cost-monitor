@@ -110,7 +110,11 @@ export class AlertSampler {
     if (mem.pct >= settings.alerts.thresholds.memPct) {
       const inserted = await this.maybeRaise({
         type: 'system.memory',
-        severity: mem.pct >= 95 ? 'critical' : 'warning',
+        // Always warning — modern OSes (especially macOS) report >95% mem
+        // routinely thanks to file-cache reuse; that's not a "critical"
+        // condition users need to be roused for. Critical is reserved for
+        // alerts the user actually wants a popup + tray icon swap on.
+        severity: 'warning',
         title: 'Device memory is running low',
         body: `${fmtBytes(mem.freeBytes)} free of ${fmtBytes(mem.totalBytes)} (${mem.pct.toFixed(0)}% used).`,
         signature: 'system.memory',
