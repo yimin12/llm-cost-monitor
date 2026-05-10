@@ -333,14 +333,11 @@ export function App(): JSX.Element {
             <span>live · {timeAgo(agg.generatedAt)} ago</span>
           </span>
         </div>
-        {/* Header used to host duplicate refresh + quit affordances; both
-            now live in the always-visible <Footer/> at the bottom of the
-            panel. Empty placeholder keeps the .dropdown-header flex
-            justify-content: space-between layout balanced. */}
-        <div className="header-actions" aria-hidden />
+        {/* AuthHeader sits inline with the brand instead of taking its
+            own row — saves vertical real estate. Refresh + quit moved
+            to the always-visible <Footer/> at the bottom of the panel. */}
+        <AuthHeader className="auth-header-inline" />
       </header>
-
-      <AuthHeader />
 
       <nav className="tab-bar" role="tablist">
         {TABS.map((t) => {
