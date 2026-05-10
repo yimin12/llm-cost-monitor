@@ -1793,10 +1793,11 @@ body {
   justify-content: center;
   width: 18px;
   height: 18px;
-  color: rgba(120, 200, 140, 0.85);
+  color: rgba(var(--fg), 0.5);
   cursor: help;
+  transition: color 120ms ease;
 }
-.privacy-badge:hover { color: rgba(140, 220, 160, 1); }
+.privacy-badge:hover { color: rgba(var(--fg), 0.92); }
 .tray-footer-actions {
   display: inline-flex;
   align-items: center;
