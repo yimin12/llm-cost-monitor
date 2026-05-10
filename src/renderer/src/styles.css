@@ -1715,17 +1715,27 @@ body {
   background: rgba(220, 90, 90, 0.18);
 }
 
-/* ───── Tray footer (version + refresh + language + quit) ───── */
+/* ───── Tray footer (version + refresh + language + quit) ─────
+ * Sticky to the bottom of the dropdown's scroll area so the language
+ * picker + refresh affordance is always reachable, even when the user
+ * is scrolled deep into the Overview tab.
+ */
 .tray-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 6px 4px 2px;
-  margin-top: 2px;
+  padding: 6px 8px;
+  margin-top: 4px;
   border-top: 1px solid var(--hairline);
   font-size: 10.5px;
   color: rgba(var(--fg), 0.5);
+  position: sticky;
+  bottom: 0;
+  background: linear-gradient(180deg, rgba(var(--bg-base), 0.6), rgba(var(--bg-base), 0.97));
+  z-index: 5;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 .tray-footer-version {
   font-family: 'SF Mono', ui-monospace, Menlo, Monaco, monospace;
