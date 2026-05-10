@@ -872,15 +872,19 @@ body {
 }
 
 .auth-btn-primary {
-  background: #ffffff;
-  color: #1f1f1f;
-  border-color: rgba(0, 0, 0, 0.1);
-  font-weight: 650;
+  /* Match the panel/footer dark shade so the button blends with the
+     surrounding chrome — only the colored Google "G" stays as the
+     brand accent. Previous white pill was visually loud against the
+     dark menubar UI. */
+  background: rgba(18, 20, 26, 0.96);
+  color: rgba(var(--fg), 0.95);
+  border-color: rgba(255, 255, 255, 0.12);
+  font-weight: 600;
   padding: 6px 14px;
 }
 .auth-btn-primary:hover:not(:disabled) {
-  background: #f1f3f4;
-  border-color: rgba(0, 0, 0, 0.15);
+  background: rgba(28, 30, 38, 0.98);
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 .privacy {
