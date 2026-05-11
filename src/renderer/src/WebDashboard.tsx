@@ -9,10 +9,9 @@ import type {
   TeamOverview,
 } from '@shared/ipc-channels'
 
-import { AreaChart, Donut, ShareBar, useAnimatedNumber } from './components/charts'
+import { AreaChart, useAnimatedNumber } from './components/charts'
 import { ProviderCatalog } from './components/ProviderCatalog'
 import {
-  formatDuration,
   formatTokens,
   microToUsd,
   providerColor,
@@ -145,16 +144,6 @@ export function WebDashboard(): JSX.Element {
             : period === '6m'
               ? agg.last6m
               : agg.last1y
-  const providerRows =
-    agg === null
-      ? []
-      : period === 'today'
-        ? agg.byProviderToday
-        : period === '6m'
-          ? agg.byProvider6m
-          : period === '1y'
-            ? agg.byProvider1y
-            : agg.byProvider30d
   const tokens = range === null ? 0 : range.inputTokens + range.outputTokens
   const animatedDollar = useAnimatedNumber(range === null ? 0 : Number(range.costMicroUsd) / 1_000_000)
 
@@ -173,16 +162,6 @@ export function WebDashboard(): JSX.Element {
       : animatedDollar >= 100
         ? `$${animatedDollar.toFixed(1)}`
         : `$${animatedDollar.toFixed(2)}`
-
-  const providerTotal = providerRows.reduce((acc, r) => acc + Number(r.costMicroUsd), 0) || 1
-  const modelTotal = agg.topModelsToday.reduce((acc, r) => acc + Number(r.costMicroUsd), 0) || 1
-  const projectTotal = agg.topProjectsToday.reduce((acc, r) => acc + Number(r.costMicroUsd), 0) || 1
-
-  const donutSlices = providerRows.map((p) => ({
-    id: p.provider,
-    value: Number(p.costMicroUsd),
-    color: providerColor(p.provider),
-  }))
 
   const forecastPct = agg.forecast
     ? Math.min(
@@ -283,56 +262,28 @@ export function WebDashboard(): JSX.Element {
           </article>
         </section>
 
-        {/* Chart + donut row */}
-        <section className="web-grid web-grid-2-1">
-          <article className="web-card">
-            <header className="web-card-head">
-              <div>
-                <h2>Daily spend</h2>
-                <p>Last 14 days — micro-USD per local calendar day.</p>
-              </div>
-              <span className="web-card-meta">
-                peak {microToUsd(agg.dailyCostMicroUsd.reduce((a, b) => (a > b ? a : b), 0n))}
-              </span>
-            </header>
-            <div className="web-chart-host">
-              <AreaChart values={agg.dailyCostMicroUsd} />
+        {/* Daily spend trend. Provider share donut + Top providers/
+            models/projects tables + Recent sessions used to live here;
+            all of that duplicated tray-panel content, so it's been
+            removed. Drill into a provider for the per-vendor breakdown
+            via its row in the Provider Catalog below. */}
+        <section className="web-card">
+          <header className="web-card-head">
+            <div>
+              <h2>Daily spend</h2>
+              <p>Last 14 days — micro-USD per local calendar day.</p>
             </div>
-            <footer className="web-chart-axis">
-              <span>14 days ago</span>
-              <span>today</span>
-            </footer>
-          </article>
-
-          <article className="web-card">
-            <header className="web-card-head">
-              <div>
-                <h2>Provider share</h2>
-                <p>Cost distribution for {period === 'today' ? 'today' : `the last ${period}`}.</p>
-              </div>
-            </header>
-            <div className="web-donut-row">
-              <Donut
-                slices={donutSlices}
-                centerLabel="providers"
-                centerValue={String(donutSlices.length)}
-              />
-              <ul className="web-legend">
-                {providerRows.map((p) => {
-                  const pct = (Number(p.costMicroUsd) / providerTotal) * 100
-                  return (
-                    <li key={p.provider}>
-                      <span className="web-legend-chip" style={{ background: providerColor(p.provider) }} />
-                      <span className="web-legend-name">{providerName(p.provider)}</span>
-                      <span className="web-legend-pct">{pct.toFixed(0)}%</span>
-                      <span className="web-legend-cost">{microToUsd(p.costMicroUsd)}</span>
-                    </li>
-                  )
-                })}
-                {providerRows.length === 0 && <li className="web-legend-empty">no calls in this range</li>}
-              </ul>
-            </div>
-          </article>
+            <span className="web-card-meta">
+              peak {microToUsd(agg.dailyCostMicroUsd.reduce((a, b) => (a > b ? a : b), 0n))}
+            </span>
+          </header>
+          <div className="web-chart-host">
+            <AreaChart values={agg.dailyCostMicroUsd} />
+          </div>
+          <footer className="web-chart-axis">
+            <span>14 days ago</span>
+            <span>today</span>
+          </footer>
         </section>
 
         {/* Forecast — total + per-provider breakdown */}
@@ -393,135 +344,6 @@ export function WebDashboard(): JSX.Element {
           </section>
         )}
 
-        {/* Three-column data row */}
-        <section className="web-grid web-grid-3">
-          <article className="web-card">
-            <header className="web-card-head">
-              <div>
-                <h2>Top providers</h2>
-                <p>{period === 'today' ? 'Today' : `Last ${period}`}.</p>
-              </div>
-            </header>
-            <ul className="web-table">
-              {providerRows.map((p) => {
-                const pct = (Number(p.costMicroUsd) / providerTotal) * 100
-                const color = providerColor(p.provider)
-                return (
-                  <li key={p.provider}>
-                    <span className="web-table-chip" style={{ background: color }} />
-                    <span className="web-table-name">{providerName(p.provider)}</span>
-                    <ShareBar pct={pct} color={color} />
-                    <span className="web-table-cost">{microToUsd(p.costMicroUsd)}</span>
-                    <span className="web-table-count">{p.eventCount}</span>
-                  </li>
-                )
-              })}
-              {providerRows.length === 0 && <li className="web-table-empty">no data</li>}
-            </ul>
-          </article>
-
-          <article className="web-card">
-            <header className="web-card-head">
-              <div>
-                <h2>Top models</h2>
-                <p>Today.</p>
-              </div>
-            </header>
-            <ul className="web-table">
-              {agg.topModelsToday.map((m) => {
-                const pct = (Number(m.costMicroUsd) / modelTotal) * 100
-                const color = providerColor(m.provider)
-                return (
-                  <li key={`${m.provider}/${m.model}`}>
-                    <span className="web-table-chip" style={{ background: color }} />
-                    <span className="web-table-name" title={m.model}>{m.model}</span>
-                    <ShareBar pct={pct} color={color} />
-                    <span className="web-table-cost">{microToUsd(m.costMicroUsd)}</span>
-                    <span className="web-table-count">{m.eventCount}</span>
-                  </li>
-                )
-              })}
-              {agg.topModelsToday.length === 0 && <li className="web-table-empty">no data</li>}
-            </ul>
-          </article>
-
-          <article className="web-card">
-            <header className="web-card-head">
-              <div>
-                <h2>Top projects</h2>
-                <p>Today.</p>
-              </div>
-            </header>
-            <ul className="web-table">
-              {agg.topProjectsToday.map((p) => {
-                const pct = (Number(p.costMicroUsd) / projectTotal) * 100
-                const label = p.project === '(none)' ? 'no project' : p.project
-                return (
-                  <li key={p.project}>
-                    <span className="web-table-chip neutral" />
-                    <span className="web-table-name" title={p.project}>{label}</span>
-                    <ShareBar pct={pct} color="rgba(167,139,250,0.6)" />
-                    <span className="web-table-cost">{microToUsd(p.costMicroUsd)}</span>
-                    <span className="web-table-count">{p.eventCount}</span>
-                  </li>
-                )
-              })}
-              {agg.topProjectsToday.length === 0 && <li className="web-table-empty">no data</li>}
-            </ul>
-          </article>
-        </section>
-
-        {/* Recent sessions table */}
-        <section className="web-card">
-          <header className="web-card-head">
-            <div>
-              <h2>Recent sessions</h2>
-              <p>Last {agg.recentSessions.length} CLI sessions, most recent first.</p>
-            </div>
-            {agg.recentSessions.length > 0 && (
-              <span className="web-card-meta">
-                last activity {timeAgo(agg.recentSessions[0]!.lastAt)} ago
-              </span>
-            )}
-          </header>
-          {agg.recentSessions.length === 0 ? (
-            <p className="web-empty">No sessions tracked yet — they appear after the first refresh.</p>
-          ) : (
-            <div className="web-sessions-table">
-              <div className="web-sessions-row web-sessions-head">
-                <span>Provider</span>
-                <span>Session</span>
-                <span>Project</span>
-                <span className="num">Calls</span>
-                <span className="num">Duration</span>
-                <span className="num">Last activity</span>
-                <span className="num">Cost</span>
-              </div>
-              {agg.recentSessions.map((s) => {
-                const color = providerColor(s.provider)
-                const dur = s.lastAt - s.firstAt
-                const project = s.project === '(none)' ? 'no project' : s.project
-                const sid = s.sessionId.length > 16
-                  ? `${s.sessionId.slice(0, 8)}…${s.sessionId.slice(-4)}`
-                  : s.sessionId
-                return (
-                  <div key={`${s.provider}/${s.sessionId}`} className="web-sessions-row">
-                    <span className="web-session-provider">
-                      <span className="web-table-chip" style={{ background: color }} />
-                      {providerName(s.provider)}
-                    </span>
-                    <span className="web-session-id" title={s.sessionId}>{sid}</span>
-                    <span className="web-session-project" title={s.project}>{project}</span>
-                    <span className="num">{s.eventCount}</span>
-                    <span className="num">{formatDuration(dur)}</span>
-                    <span className="num">{timeAgo(s.lastAt)} ago</span>
-                    <span className="num web-session-cost">{microToUsd(s.costMicroUsd)}</span>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </section>
 
         {/* Provider catalog — full vendor list with capability filter +
             inline onboarding form. Replaces the simple Sources grid;
