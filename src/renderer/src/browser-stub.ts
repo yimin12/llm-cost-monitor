@@ -7,9 +7,12 @@ import { DEFAULT_SETTINGS } from '@shared/settings'
 import type {
   AggregateSnapshot,
   AppSettings,
+  AuthState,
   PricingInfo,
   ProviderListEntry,
   StorageInfo,
+  TeamOverview,
+  YieldScoreSnapshot,
 } from '@shared/ipc-channels'
 
 const usd = (n: number): bigint => BigInt(Math.round(n * 1_000_000))
@@ -183,6 +186,31 @@ const seedAlerts: Alert[] = [
   },
 ]
 
+// Try the real loopback API on every read, fall back to the local
+// fixture when it isn't reachable. Tags in the wire format:
+//   - bigint → "<digits>n" string (reversed here by jsonReviver)
+// See src/main/web-api/web-api-server.ts for the serialiser side.
+const WEB_API_BASE =
+  (typeof window !== 'undefined'
+    ? (window as unknown as { __LCM_WEB_API_BASE__?: string }).__LCM_WEB_API_BASE__
+    : undefined) ?? 'http://127.0.0.1:4018'
+
+function jsonReviver(_k: string, v: unknown): unknown {
+  if (typeof v === 'string' && /^-?\d+n$/.test(v)) return BigInt(v.slice(0, -1))
+  return v
+}
+
+async function getReal<T>(path: string): Promise<T | null> {
+  try {
+    const res = await fetch(`${WEB_API_BASE}${path}`)
+    if (!res.ok) return null
+    const text = await res.text()
+    return JSON.parse(text, jsonReviver) as T
+  } catch {
+    return null
+  }
+}
+
 export function installBrowserStub(): void {
   if (typeof window === 'undefined' || (window as unknown as { api?: unknown }).api) return
   // Browser-mode alerts state — mutable so the demo UI is interactive
@@ -194,12 +222,12 @@ export function installBrowserStub(): void {
   let cachedSettings: AppSettings = fakeSettings
   ;(window as unknown as { api: unknown }).api = {
     ping: async () => 'pong (browser-stub)',
-    pricingInfo: async () => fakePricing,
-    storageInfo: async () => fakeStorage,
-    aggregates: async () => fakeSnapshot,
-    providersList: async () => fakeProviders,
+    pricingInfo: async () => (await getReal<PricingInfo>('/v1/pricing')) ?? fakePricing,
+    storageInfo: async () => (await getReal<StorageInfo>('/v1/storage')) ?? fakeStorage,
+    aggregates: async () => (await getReal<AggregateSnapshot>('/v1/aggregates')) ?? fakeSnapshot,
+    providersList: async () => (await getReal<ProviderListEntry[]>('/v1/providers')) ?? fakeProviders,
     providersRefresh: async () => fakeProviders.map((p) => ({ provider: p.id, error: null })),
-    settings: async () => cachedSettings,
+    settings: async () => (await getReal<AppSettings>('/v1/settings')) ?? cachedSettings,
     setSettings: async (patch: Partial<AppSettings>) => {
       cachedSettings = {
         ...cachedSettings,
@@ -222,8 +250,11 @@ export function installBrowserStub(): void {
     onUsageUpdated: () => () => {},
     onSettingsChanged: () => () => {},
 
-    // Auth — browser-mode preview is always signed-out.
-    authCurrent: async () => ({ kind: 'signed-out' }),
+    // Auth — pulls real auth state from the loopback API when
+    // available so the browser tab shows the same user that's
+    // signed in via the tray (avatar, email, plan chip etc.).
+    // Sign-in / sign-out still happen in the tray only.
+    authCurrent: async () => (await getReal<AuthState>('/v1/auth')) ?? { kind: 'signed-out' },
     authSignIn: async () => ({ kind: 'signed-out' }),
     authSignOut: async () => ({ kind: 'signed-out' }),
     onAuthStateChanged: () => () => {},
@@ -231,13 +262,21 @@ export function installBrowserStub(): void {
     dashboardUrl: async () => null,
     openDashboard: async () => {},
 
-    // Alerts — fully interactive against the in-memory demo list.
+    // Alerts — reads pull from the real API when reachable, else fall
+    // back to the interactive in-memory demo list. Mutations stay
+    // local to the browser tab (the loopback API is read-only).
     alertsList: async (filter: 'open' | 'resolved' | 'all') => {
+      const real = await getReal<Alert[]>(`/v1/alerts?filter=${filter}`)
+      if (real !== null) return real
       if (filter === 'all') return alerts
       if (filter === 'resolved') return alerts.filter((a) => a.status === 'resolved')
       return alerts.filter((a) => a.status !== 'resolved')
     },
     alertsSummary: async () => {
+      const real = await getReal<{
+        open: number; acked: number; snoozed: number; resolved: number
+      }>('/v1/alerts/summary')
+      if (real !== null) return real
       const out = { open: 0, acked: 0, snoozed: 0, resolved: 0 }
       for (const a of alerts) {
         if (a.status in out) out[a.status as keyof typeof out]++
@@ -287,13 +326,14 @@ export function installBrowserStub(): void {
       lastError: null,
       nodeId: 'demo-node-id',
     }),
-    syncTeamOverview: async () => null,
+    syncTeamOverview: async () => getReal<TeamOverview | null>('/v1/team-overview'),
     onSyncStatusChanged: () => () => {},
     teamAddMember: async () => ({ ok: false, status: 0, error: 'browser_stub' }),
     teamRevokeMember: async () => ({ ok: false, status: 0, error: 'browser_stub' }),
     teamSetMemberRole: async () => ({ ok: false, status: 0, error: 'browser_stub' }),
     teamSetPrivacyFloor: async () => ({ ok: false, status: 0, error: 'browser_stub' }),
-    yieldScore: async (period: '7d' | '30d' | '90d') => ({
+    yieldScore: async (period: '7d' | '30d' | '90d') =>
+      (await getReal<YieldScoreSnapshot>(`/v1/yield-score?period=${period}`)) ?? ({
       period,
       windowStartMs: 0,
       generatedAt: Date.now(),
