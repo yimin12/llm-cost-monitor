@@ -36,6 +36,7 @@ import {
   setTeamPrivacyFloor,
   type ManageResult,
 } from './sync/team-overview-client'
+import { startWebApiServer } from './web-api/web-api-server'
 import type { TeamManageResult } from '@shared/ipc-channels'
 
 app.on('window-all-closed', () => {
@@ -350,6 +351,19 @@ void app.whenReady().then(async () => {
     onAlertsChanged: () => {
       void updateTrayPresentation()
     },
+  })
+
+  // Loopback HTTP server that mirrors the read-only window.api surface.
+  // Lets the WebDashboard talk to real data when opened in a regular
+  // browser tab (where Electron's IPC bridge isn't injected).
+  startWebApiServer({
+    aggregator,
+    events,
+    providers,
+    pricing,
+    alerts: alertRepo,
+    settings,
+    auth,
   })
 
   // Best-effort silent restore — a stored refresh_token + active auth_user

@@ -11,7 +11,99 @@ Companion docs:
 
 ---
 
-## 2026-05-08 — Auth slices A2–A6 done; PR #1 open; live OAuth validated
+## 2026-05-10 / 2026-05-11 — Four PRs in one long session (#10–#13)
+
+### PR #10 — Bundled Google OAuth client (merged `af13bbf`)
+
+User reported their second laptop couldn't sign in. Root cause: env-loader only read `GCP_CLIENTID` + `GCP_CLIENTSECRET` from `~/.env`; a fresh clone with no env file booted with "sign-in disabled".
+
+Per Google's own docs + RFC 8252 §8.5, `client_secret` for a **Desktop / Installed Application** OAuth client is **non-confidential** — every shipped Electron app with Google sign-in (gcloud CLI, Cursor, Raycast, Stripe CLI) embeds both. New `src/shared/oauth-config.ts` holds `BUNDLED_GOOGLE_OAUTH` (committed). `env-loader.ts` priority: env wins, bundled fallback. `AuthSecrets.source: 'env' | 'bundled' | 'mixed'` surfaced in the startup log.
+
+Drive-by: bumped `auth-repository.test.ts` schema-version assertion 4 → 5 (PR #9's migration `0005` had landed unfollowed).
+
+### PR #11 — Multilingual UI + tray footer + Yield Score + Gemini Pro detection (merged `b27b7c2`)
+
+The big PR. Squashed 14 in-flight commits.
+
+**i18n** (library-free, ~50 lines of context + dictionary lookup):
+- `src/shared/i18n/{locales,messages}.ts` — `Locale = en | zh-CN | ja`, `LocaleSetting = auto | …`, `resolveLocale(setting, osLocale)` maps OS locale → bundle.
+- `src/renderer/src/i18n/LocaleProvider.tsx` — context + `useT()` hook. Missing translation falls back to EN.
+- `AppSettings.locale` (default `'auto'`), migrated in `store.ts`.
+
+**Tray footer** (CLI-Pulse-style chrome row):
+- `<Footer>` = version chip + refresh + globe (language picker popover) + quit.
+- Sits **outside** `.dropdown-scroll` (new flex-column layout) so it's anchored to the bottom regardless of scroll. (Earlier `position: sticky` attempts didn't fire because the Lenis inertia-scroll hook intercepts wheel events.)
+- Removed the duplicate refresh button from the brand row header.
+
+**PrivacyBadge** — click-to-open popover (was hover-tooltip), help-circle icon, same dark shade as the language popover so the two footer popups read as one surface family.
+
+**Auth header consolidation** — `<AuthHeader>` now renders inline in the brand row (`.auth-header-inline` variant): avatar + Sign-out only (email hidden, available via avatar `title=`). Avatar wrapped in `<a href='https://myaccount.google.com'>`. Sign-in-with-Google button restyled dark to match panel.
+
+**Window-open handler** — `webContents.setWindowOpenHandler` on the tray BrowserWindow routes any `http(s)` `target='_blank'` link through `shell.openExternal`. Without this every external link in the renderer silently no-op'd.
+
+**Gemini "Code Assist · Google One AI Pro" detection** (the user's "我是 Pro 你为什么检测不到"):
+- `src/main/providers/google/plan.ts` now calls `POST https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist` with the existing OAuth access token from `~/.gemini/oauth_creds.json` (only when `expiry_date > now` to avoid refreshing on Gemini CLI's behalf).
+- Reads `paidTier.name ?? currentTier.name`, condenses verbose names (e.g. "Gemini Code Assist in Google One AI Pro" → just `Pro`) via keyword scan (Ultra > Enterprise > Pro > Standard > Legacy > Free). Tier-id fallback when `name` is absent.
+- `authMode` flips from `oauth` to `subscription` when a real tier resolves; renderer's chip styling auto-picks the Pro look.
+- Endpoint shape derived from `github.com/google-gemini/gemini-cli/.../code_assist/{setup,server,types}.ts`.
+
+**Yield Score** (cost per git commit — opt-in via Settings → Privacy → Track git activity):
+- `src/main/git/git-scanner.ts` — walks `~` up to 2 levels deep, finds `.git` dirs (cap 50, 5s timeout per `git log`), skip-list for noise dirs. Reads `git log --since=… --pretty=%P` — parent hashes only. Counts commits + merges. Never reads messages / diffs / files / author.
+- IPC + UI + period selector.
+
+**Shared `<KpiTile>` primitive** — TODAY hero on Overview tab + Yield Score tiles both use it. CLI-Pulse-style: icon + UPPERCASE label + big value + optional sub.
+
+**Provider Catalog merge with PR #7** — main shipped its own parallel catalog implementation; resolved by adopting main's `CATALOG`/`providerCredentials` schema, dropping my parallel `providerApiKeys`/safeStorage path. Filed as a known follow-up (the safeStorage upgrade rides on top of main's field name).
+
+**WebDashboard slimmed** — dropped Provider share donut + Top providers/models/projects + Recent sessions (all duplicated tray Overview content). Kept hero + daily spend + forecast + ProviderCatalog + Team Details.
+
+**Team management dashboard** (under-the-hood on the server side; rolled in this PR):
+- `team_members.role = 'admin' | 'member'` threaded through. `addMember` auto-promotes first member to admin inside `SELECT … FOR UPDATE` on `teams` (race-safe).
+- `setMemberRole` refuses to demote the last admin.
+- `setPrivacyFloor` + `getTeamMeta`.
+- `getOverview` returns `currentUserRole`, `privacyFloor`, `todayCostMicroUsd`, `activeMembers`, `activeNodes`.
+- New admin-gated routes: `POST/DELETE/PATCH /v1/teams/:id/members`, `PATCH /v1/teams/:id/privacy-floor`.
+- Renderer: TeamTab pulse-style redesign with role-aware actions.
+
+160 → 172 tests; typecheck + eslint clean throughout.
+
+### PR #12 — WebDashboard "show everything" + Overview/Team page split (merged `e652122`)
+
+User reversed PR #11's "drop duplicates" pass on the web view — the web is the comprehensive desktop surface, tray is the high-density 390px summary; duplication is OK at the web tier.
+
+Restored Provider share donut + Top providers/models/projects 3-grid + Recent sessions. Added Yield Score card (reusing the tray component) and an Alerts panel (read-only mirror of the tray Alerts tab; ack/resolve still in tray).
+
+Then split the web into two top-level pages with persistent `lcm.web.tab` localStorage state:
+- **Overview** — all the usage panels.
+- **Team** — *only* the Team Details, no surrounding noise. Member-count badge on the tab title.
+
+Active tab styled with bottom underline gradient; period selector + page-head copy gate by tab.
+
+### PR #13 — Loopback HTTP server so the browser-served WebDashboard sees real data (OPEN, this branch)
+
+User opened `http://localhost:5173/` in Chrome and saw `$4.27` today (vs `$368` in the tray). Diagnosis: `main.tsx` detects non-Electron via userAgent and installs `browser-stub.ts`, which replaces `window.api` with a **fixed demo fixture** ($4.27 / 12 calls / 84.1k tokens — hardcoded). Demo data, not real.
+
+Fix architecture:
+- `src/main/web-api/web-api-server.ts` — loopback HTTP server bound to `127.0.0.1:4018` (env `LCM_WEB_API_PORT`). Read-only mirror of the read-only window.api surface: `/healthz`, `/v1/aggregates`, `/v1/storage`, `/v1/providers`, `/v1/pricing`, `/v1/settings`, `/v1/auth`, `/v1/alerts/summary`, `/v1/alerts?filter=`, `/v1/team-overview`, `/v1/yield-score?period=`.
+- **BigInt wire format:** `JSON.stringify` replacer tags every bigint as `"<digits>n"`; browser-stub uses a matching reviver. Renderer consumes real `bigint` regardless of transport.
+- **CORS:** `Access-Control-Allow-Origin: *`. Safe because the server binds to `127.0.0.1` only — never reachable from LAN. (Initial hardcoded `localhost:5173` rejected Chrome's `127.0.0.1:5173` origin → silent fetch fail → fallback to fake.)
+- `browser-stub.ts` every read-only method: `(await getReal(path)) ?? fakeFallback`. Mutations stay in-browser (the loopback API is read-only).
+
+Bug fixes during PR #13 itself:
+- `7f9814c` — `await providers.describe()` (was Promise → `{}` → React `.map()` crash → blank page).
+- `12d46c5` — CORS `*`.
+- `87f9df4` — Refactor: extracted `buildYieldSnapshot` to `src/main/git/yield-snapshot.ts` so the IPC handler + HTTP handler can't drift (was 60 lines of duplicated logic across `ipc.ts` and `web-api-server.ts`; both call sites are now one-liners).
+
+Verified: `curl http://127.0.0.1:4018/v1/aggregates` returns real costs (e.g. `362470015n` = $362.47); `/v1/yield-score?period=30d` → `enabled: true, commits: 364, repos: 2`. 172/172 vitest + typecheck + lint clean.
+
+### Cross-PR drive-bys
+
+- **Hot-apply rule saved** as `~/.claude/projects/-Volumes-Portal-SSD-pojo-devbar-llm-cost-monitor/memory/feedback_hot_apply.md`: restart the dev app on every code change unless told otherwise.
+- **Docker portable backend** (`Dockerfile.server`, compose `server` profile, `LCM_SYNC_URL`) earlier in the session — landed before PR #10, merged as PR #8.
+
+---
+
+
 
 User created a **Desktop**-type OAuth client in GCP Console (client_id
 `474644305609-itbl41…`); credentials in `~/.env` as `GCP_CLIENTID` +
