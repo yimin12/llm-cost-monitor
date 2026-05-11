@@ -25,31 +25,48 @@ interface GoogleAccounts {
 
 // ── Shape of Google's Code Assist loadCodeAssist response. Endpoint
 // is internal/undocumented (used by the Gemini CLI itself); shape
-// derived from github.com/google-gemini/gemini-cli/packages/core/src/code_assist/server.ts.
+// derived from
+// github.com/google-gemini/gemini-cli/packages/core/src/code_assist/types.ts.
+// GeminiUserTier has a `name` field that's the *human-readable display
+// string* — e.g. "Gemini Code Assist in Google One AI Pro" — the
+// Gemini CLI uses to paint its own "Plan: …" banner. We prefer that
+// over deriving a label from the tier id ourselves.
+interface GeminiUserTier {
+  id?: string // 'free-tier' | 'legacy-tier' | 'standard-tier'
+  name?: string
+}
 interface LoadCodeAssistResponse {
-  currentTier?: { id?: string }
-  paidTier?: {
-    availableCredits?: Array<{ creditType?: string; creditAmount?: string }>
-  }
+  currentTier?: GeminiUserTier | null
+  paidTier?: GeminiUserTier | null
 }
 
 const CODE_ASSIST_URL =
   'https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist'
 const CODE_ASSIST_TIMEOUT_MS = 4_000
 
-// Decide the plan label from the Code Assist response. Mirrors the
-// Gemini CLI's "Plan: …" banner string so devbar's chip matches what
-// the user already sees in their terminal.
-function planNameFromCodeAssist(r: LoadCodeAssistResponse): string | null {
-  const credits = r.paidTier?.availableCredits ?? []
-  if (credits.some((c) => c.creditType === 'GOOGLE_ONE_AI')) {
-    return 'Code Assist · Google One AI Pro'
-  }
-  const tier = r.currentTier?.id
-  if (tier === 'standard-tier') return 'Code Assist · Standard'
-  if (tier === 'legacy-tier') return 'Code Assist · Legacy'
-  if (tier === 'free-tier') return 'Code Assist · Free'
+// Map a tier *id* to a label as a last-resort fallback when Google's
+// response omits `name`. Kept here so the chip never reads as a raw
+// `standard-tier` slug.
+function tierIdLabel(id: string | undefined): string | null {
+  if (id === 'standard-tier') return 'Code Assist · Standard'
+  if (id === 'legacy-tier') return 'Code Assist · Legacy'
+  if (id === 'free-tier') return 'Code Assist · Free'
   return null
+}
+
+// Decide the plan label. Preference order:
+//   1. paidTier.name  — Pro/Ultra/Enterprise users; matches what
+//      the Gemini CLI's "Plan: …" banner prints verbatim.
+//   2. currentTier.name — non-paid users with a server-provided name.
+//   3. tierIdLabel(paidTier.id ?? currentTier.id) — internal slugs.
+function planNameFromCodeAssist(r: LoadCodeAssistResponse): string | null {
+  if (r.paidTier?.name !== undefined && r.paidTier.name.length > 0) {
+    return r.paidTier.name
+  }
+  if (r.currentTier?.name !== undefined && r.currentTier.name.length > 0) {
+    return r.currentTier.name
+  }
+  return tierIdLabel(r.paidTier?.id) ?? tierIdLabel(r.currentTier?.id)
 }
 
 async function fetchCodeAssistTier(

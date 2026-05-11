@@ -100,7 +100,7 @@ describe('detectGooglePlan', () => {
     expect(plan.authMode).toBe('unknown')
   })
 
-  it('upgrades to "subscription" + Google One AI Pro when Code Assist reports paidTier credits', async () => {
+  it('uses paidTier.name verbatim when Google provides one', async () => {
     const idToken = fakeJwt({ email: 'g@example.com' })
     await writeFile(
       join(dir, 'oauth_creds.json'),
@@ -114,16 +114,17 @@ describe('detectGooglePlan', () => {
       geminiHome: dir,
       env: {},
       fetchImpl: mockFetchJson({
-        currentTier: { id: 'standard-tier' },
-        paidTier: { availableCredits: [{ creditType: 'GOOGLE_ONE_AI', creditAmount: '1' }] },
+        currentTier: { id: 'standard-tier', name: 'Gemini Code Assist Standard' },
+        paidTier: { id: 'standard-tier', name: 'Gemini Code Assist in Google One AI Pro' },
       }),
     })
     expect(plan.authMode).toBe('subscription')
-    expect(plan.planName).toBe('Code Assist · Google One AI Pro')
+    // Exact label Google sends — matches the Gemini CLI's own banner.
+    expect(plan.planName).toBe('Gemini Code Assist in Google One AI Pro')
     expect(plan.detail).toBe('g@example.com')
   })
 
-  it('maps free-tier tier id to Code Assist · Free', async () => {
+  it('prefers currentTier.name over the tier-id fallback', async () => {
     const idToken = fakeJwt({ email: 'g@example.com' })
     await writeFile(
       join(dir, 'oauth_creds.json'),
@@ -132,10 +133,26 @@ describe('detectGooglePlan', () => {
     const plan = await detectGooglePlan({
       geminiHome: dir,
       env: {},
-      fetchImpl: mockFetchJson({ currentTier: { id: 'free-tier' } }),
+      fetchImpl: mockFetchJson({
+        currentTier: { id: 'free-tier', name: 'Gemini Code Assist Free' },
+      }),
     })
     expect(plan.authMode).toBe('subscription')
-    expect(plan.planName).toBe('Code Assist · Free')
+    expect(plan.planName).toBe('Gemini Code Assist Free')
+  })
+
+  it('falls back to a tier-id label when Google omits name', async () => {
+    const idToken = fakeJwt({ email: 'g@example.com' })
+    await writeFile(
+      join(dir, 'oauth_creds.json'),
+      JSON.stringify({ access_token: 'a', id_token: idToken, expiry_date: Date.now() + 60_000 }),
+    )
+    const plan = await detectGooglePlan({
+      geminiHome: dir,
+      env: {},
+      fetchImpl: mockFetchJson({ currentTier: { id: 'standard-tier' } }),
+    })
+    expect(plan.planName).toBe('Code Assist · Standard')
   })
 
   it('falls back to Google Account when the access token is expired (no Code Assist call attempted)', async () => {
