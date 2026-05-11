@@ -27,7 +27,23 @@ import {
 
 type Period = 'today' | '7d' | '1m' | '6m' | '1y'
 
+// Web-view top-level page. Overview is the comprehensive usage
+// dashboard; Team is a separate page focused on the shared sync
+// surface so it isn't drowning under personal-usage panels.
+type Tab = 'overview' | 'team'
+const TAB_KEY = 'lcm.web.tab'
 const PERIOD_KEY = 'lcm.web.period'
+
+function loadInitialTab(): Tab {
+  try {
+    const v = localStorage.getItem(TAB_KEY)
+    if (v === 'overview' || v === 'team') return v
+  } catch {
+    /* */
+  }
+  return 'overview'
+}
+
 const PERIOD_LABEL: Record<Period, string> = {
   today: 'Today',
   '7d': '7d',
@@ -70,6 +86,7 @@ export function WebDashboard(): JSX.Element {
   const [openAlerts, setOpenAlerts] = useState<Alert[]>([])
   const [refreshing, setRefreshing] = useState(false)
   const [period, setPeriod] = useState<Period>(loadInitialPeriod)
+  const [tab, setTab] = useState<Tab>(loadInitialTab)
   const [, forceTick] = useState(0)
 
   const reload = useCallback(async () => {
@@ -130,6 +147,10 @@ export function WebDashboard(): JSX.Element {
   useEffect(() => {
     try { localStorage.setItem(PERIOD_KEY, period) } catch { /* */ }
   }, [period])
+
+  useEffect(() => {
+    try { localStorage.setItem(TAB_KEY, tab) } catch { /* */ }
+  }, [tab])
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true)
@@ -237,30 +258,60 @@ export function WebDashboard(): JSX.Element {
         </div>
       </header>
 
+      <nav className="web-tab-nav" role="tablist" aria-label="Pages">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === 'overview'}
+          className={tab === 'overview' ? 'web-tab active' : 'web-tab'}
+          onClick={() => setTab('overview')}
+        >
+          Overview
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === 'team'}
+          className={tab === 'team' ? 'web-tab active' : 'web-tab'}
+          onClick={() => setTab('team')}
+        >
+          Team
+          {teamOverview !== null && teamOverview.members.length > 0 && (
+            <span className="web-tab-badge">{teamOverview.members.length}</span>
+          )}
+        </button>
+      </nav>
+
       <main className="web-main">
         <section className="web-page-head">
           <div>
-            <h1>Dashboard</h1>
+            <h1>{tab === 'team' ? 'Team' : 'Dashboard'}</h1>
             <p>
-              Cost and token activity across your local CLI sessions. All data stays on this
-              machine — nothing is sent anywhere.
+              {tab === 'team'
+                ? 'Shared usage across everyone signed into your team. Sync uploads only a redacted projection — raw prompts, responses, and project paths stay on each device.'
+                : 'Cost and token activity across your local CLI sessions. All data stays on this machine — nothing is sent anywhere.'}
             </p>
           </div>
-          <div className="web-period" role="tablist">
-            {(['today', '7d', '1m', '6m', '1y'] as const).map((k) => (
-              <button
-                key={k}
-                type="button"
-                role="tab"
-                aria-selected={period === k}
-                className={period === k ? 'web-period-tab active' : 'web-period-tab'}
-                onClick={() => setPeriod(k)}
-              >
-                {PERIOD_LABEL[k]}
-              </button>
-            ))}
-          </div>
+          {tab === 'overview' && (
+            <div className="web-period" role="tablist">
+              {(['today', '7d', '1m', '6m', '1y'] as const).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  role="tab"
+                  aria-selected={period === k}
+                  className={period === k ? 'web-period-tab active' : 'web-period-tab'}
+                  onClick={() => setPeriod(k)}
+                >
+                  {PERIOD_LABEL[k]}
+                </button>
+              ))}
+            </div>
+          )}
         </section>
+
+        {tab === 'overview' && (
+          <>
 
         {/* KPI row */}
         <section className="web-kpi-row">
@@ -575,10 +626,13 @@ export function WebDashboard(): JSX.Element {
         {/* Provider catalog — full vendor list with capability filter +
             inline onboarding form. */}
         <ProviderCatalog detectedProviders={providers} settings={settings} />
+          </>
+        )}
 
-        {/* Team Details — always rendered. Empty state when sync is off
-            so users who clicked the tray "Team Details" button always
-            land on a meaningful surface, not the provider Sources card. */}
+        {tab === 'team' && (
+        <>
+        {/* Team page — distinct surface. Always rendered when this
+            tab is active; empty state explains how to wire sync. */}
         {teamOverview === null ? (
           <section className="web-card">
             <header className="web-card-head">
@@ -732,6 +786,8 @@ export function WebDashboard(): JSX.Element {
               </div>
             </div>
           </section>
+        )}
+        </>
         )}
 
         <footer className="web-footer">

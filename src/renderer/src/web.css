@@ -163,6 +163,59 @@ html.web #root {
   box-shadow: 0 2px 12px rgba(99, 173, 255, 0.3);
 }
 
+/* Top-level page tabs (Overview / Team). Sits between the nav and
+   the main scroll area. Underline-style active state so the period
+   pills don't visually compete with the page-tabs row above them. */
+.web-tab-nav {
+  display: flex;
+  gap: 4px;
+  padding: 6px 32px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.15);
+}
+.web-tab {
+  position: relative;
+  background: transparent;
+  border: 0;
+  color: rgba(245, 245, 247, 0.55);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  padding: 12px 18px;
+  cursor: pointer;
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: color 120ms ease;
+}
+.web-tab:hover { color: rgba(245, 245, 247, 0.9); }
+.web-tab.active { color: rgba(245, 245, 247, 1); }
+.web-tab.active::after {
+  content: '';
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: linear-gradient(90deg, rgba(99, 173, 255, 0.95), rgba(167, 139, 250, 0.95));
+}
+.web-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: rgba(99, 173, 255, 0.18);
+  color: rgba(99, 173, 255, 1);
+  font-size: 10.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ───── KPI row ───── */
 .web-kpi-row {
   display: grid;
