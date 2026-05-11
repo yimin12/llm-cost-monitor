@@ -34,7 +34,11 @@ export interface WebApiDeps {
 }
 
 const DEFAULT_PORT = Number(process.env['LCM_WEB_API_PORT'] ?? 4_018)
-const ALLOWED_ORIGIN_DEV = 'http://localhost:5173'
+// Allow any origin. Safe because the server itself binds to
+// 127.0.0.1 only — there's no LAN attack surface. The renderer
+// (whether opened at localhost:5173 or 127.0.0.1:5173 or a future
+// origin) connects without per-host configuration.
+const ALLOWED_ORIGIN_DEV = '*'
 
 function jsonReplacer(_key: string, value: unknown): unknown {
   if (typeof value === 'bigint') return `${value}n`
