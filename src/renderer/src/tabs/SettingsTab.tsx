@@ -102,6 +102,8 @@ export function SettingsTab({
 
       <PlanOverrideCard providers={providers} settings={settings} />
 
+      <PrivacyCard settings={settings} />
+
       <section className="settings-card about-card">
         <div className="settings-card-head">
           <h3>About</h3>
@@ -335,6 +337,46 @@ function PlanOverrideCard({
           )
         })}
       </div>
+    </section>
+  )
+}
+
+// ── Privacy card ──────────────────────────────────────────────────
+// Opt-in toggles for features that touch sources outside the
+// existing on-disk CLI logs. Each toggle reads + writes its own
+// settings sub-field; nothing here is on by default.
+
+function PrivacyCard({ settings }: { settings: AppSettings | null }): JSX.Element {
+  const trackGit = settings?.privacy?.trackGitActivity === true
+
+  return (
+    <section className="settings-card">
+      <div className="settings-card-head">
+        <h3>Privacy</h3>
+      </div>
+
+      <label className="settings-row" htmlFor="setting-track-git">
+        <span className="settings-row-text">
+          <span className="settings-row-label">Track git activity</span>
+          <span className="settings-row-help">
+            Powers the Yield Score (AI cost per commit). Only the commit
+            hash, HMAC of the project path, timestamp, and merge-flag
+            are recorded locally. Messages, diffs, file lists, and
+            author info never leave the device.
+          </span>
+        </span>
+        <input
+          id="setting-track-git"
+          type="checkbox"
+          className="settings-switch"
+          checked={trackGit}
+          onChange={(e) => {
+            void window.api.setSettings({
+              privacy: { trackGitActivity: e.currentTarget.checked },
+            })
+          }}
+        />
+      </label>
     </section>
   )
 }

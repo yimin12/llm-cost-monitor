@@ -368,7 +368,7 @@ export function App(): JSX.Element {
       <main className="tab-pane">
         {mountedTabs.has('overview') && (
           <div hidden={activeTab !== 'overview'}>
-            <OverviewTab agg={agg} period={period} onPeriodChange={setPeriod} />
+            <OverviewTab agg={agg} period={period} onPeriodChange={setPeriod} settings={settings} />
           </div>
         )}
         {mountedTabs.has('providers') && (

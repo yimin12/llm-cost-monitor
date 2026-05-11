@@ -1,6 +1,8 @@
 import type { AggregateSnapshot, CostByModel, CostByProject, CostByProvider } from '@shared/aggregates'
+import type { AppSettings } from '@shared/ipc-channels'
 
 import { AreaChart, Donut, ShareBar, useAnimatedNumber } from '../components/charts'
+import { YieldScoreCard } from '../components/YieldScoreCard'
 import { formatTokens, microToUsd, providerColor, providerName } from '../lib/format'
 
 function ProviderRows({ rows }: { rows: CostByProvider[] }): JSX.Element {
@@ -101,10 +103,11 @@ const PERIOD_LABEL: Record<Period, string> = {
   '1y': '1y',
 }
 
-export function OverviewTab({ agg, period, onPeriodChange }: {
+export function OverviewTab({ agg, period, onPeriodChange, settings }: {
   agg: AggregateSnapshot
   period: Period
   onPeriodChange: (p: Period) => void
+  settings: AppSettings | null
 }): JSX.Element {
   const range = agg[PERIOD_RANGE[period]]
   const providerRows =
@@ -232,6 +235,8 @@ export function OverviewTab({ agg, period, onPeriodChange }: {
           <span>Need ≥ 3 days of usage this month to forecast.</span>
         </section>
       )}
+
+      <YieldScoreCard settings={settings} />
 
       <section className="block">
         <div className="block-head">

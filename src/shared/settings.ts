@@ -67,6 +67,22 @@ export interface AppSettings {
   // UI language. 'auto' resolves to the OS locale at runtime — see
   // src/shared/i18n/locales.ts.
   locale: LocaleSetting
+  // Privacy-gated extras. Each entry here is OFF by default so the
+  // user has to explicitly opt in.
+  privacy: PrivacySettings
+}
+
+export interface PrivacySettings {
+  // "Yield Score" — cost-per-commit ratio. Off by default. When on,
+  // a background scanner reads the user's git repos (paths discovered
+  // via configured project roots) and records commit hash + HMAC of
+  // path + timestamp + merge-flag locally. Commit messages, diffs,
+  // file lists and author info NEVER leave the device.
+  trackGitActivity: boolean
+}
+
+export const DEFAULT_PRIVACY: PrivacySettings = {
+  trackGitActivity: false,
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -98,4 +114,5 @@ export const DEFAULT_SETTINGS: AppSettings = {
   planOverrides: {},
   providerCredentials: {},
   locale: 'auto',
+  privacy: DEFAULT_PRIVACY,
 }

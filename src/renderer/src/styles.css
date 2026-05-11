@@ -891,6 +891,88 @@ body {
  * meta row. The PrivacyBanner component itself is unmounted but kept
  * in src/renderer/src/components/PrivacyBanner.tsx for now in case
  * we ever want a verbose surface back.) */
+
+/* ─── Yield Score card (Overview tab) ─── */
+.yield-card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.yield-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.yield-card-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 650;
+  color: rgba(var(--fg), 0.95);
+}
+.yield-card-glyph {
+  display: inline-flex;
+  color: rgba(255, 200, 100, 0.85);
+}
+.yield-card-tag {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  color: rgba(var(--fg), 0.45);
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.yield-period {
+  background: rgba(0, 0, 0, 0.25);
+  color: rgba(var(--fg), 0.9);
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  padding: 3px 7px;
+  font-size: 10.5px;
+  font-family: inherit;
+}
+.yield-card-empty {
+  font-size: 11.5px;
+  color: rgba(var(--fg), 0.78);
+  line-height: 1.5;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.yield-card-empty p { margin: 0; }
+.yield-card-empty .yield-card-sub {
+  font-size: 10.5px;
+  color: rgba(var(--fg), 0.5);
+}
+.yield-card-empty strong { color: rgba(var(--fg), 0.95); font-weight: 600; }
+
+/* ─── Settings row (label + help text + switch) ─── */
+.settings-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  cursor: pointer;
+}
+.settings-row-text { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+.settings-row-label { font-size: 12px; font-weight: 600; color: rgba(var(--fg), 0.92); }
+.settings-row-help { font-size: 10.5px; color: rgba(var(--fg), 0.55); line-height: 1.5; }
+.settings-switch {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+  accent-color: rgba(120, 200, 140, 0.9);
+}
 .privacy-line code {
   background: rgba(255, 255, 255, 0.06);
   border-radius: 4px;
