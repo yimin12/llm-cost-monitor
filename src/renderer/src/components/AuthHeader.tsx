@@ -134,7 +134,7 @@ export function AuthHeader({ className }: AuthHeaderProps): JSX.Element {
     return (
       <div className={`auth-header ${className ?? ''}`}>
         <span className="auth-error" title={state.message}>
-          ⚠ {state.message}
+          ⚠ Login failed
         </span>
         <button
           type="button"

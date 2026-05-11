@@ -21,7 +21,7 @@ mac:
     - target: dmg
       arch:
         - universal
-  icon: resources/icons/tray-Template.png
+  icon: resources/icons/app-icon.png
   # Code signing and notarization configured in slice 15.
   # identity: null
   # notarize: false
@@ -30,7 +30,7 @@ linux:
   target:
     - deb
     - AppImage
-  icon: resources/icons/tray-Template.png
+  icon: resources/icons/app-icon.png
   category: Utility
 
 deb:
