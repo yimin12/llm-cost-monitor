@@ -24,6 +24,12 @@
 6. 离线时本机仍能工作；联网后自动同步。
 7. 团队版可以部署到私有服务器，不强依赖官方云。
 
+多 node 同一用户的 usage/cost 合并规则单独展开在
+[`docs/multi-node-usage-merge-design.md`](./docs/multi-node-usage-merge-design.md)。
+这份设计要求 Claude 等 provider 的 cost 不只是按金额相加，还要把
+token bucket、model、project hash、pricing snapshot、node health 等支撑维度一起合并。
+实现时默认 dashboard 查询必须走 rollup 或受索引约束的短窗口查询，不能在热路径全表扫描 raw events。
+
 ## 推荐架构
 
 ```text
