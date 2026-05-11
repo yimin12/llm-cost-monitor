@@ -96,6 +96,15 @@ const PERIOD_BY_PROVIDER: Record<Exclude<Period, 'today'>, keyof Pick<
   '1y': 'byProvider1y',
 }
 
+// Daily-spend chart slices the last N entries of dailyCostMicroUsd.
+const PERIOD_DAYS: Record<Period, number> = {
+  today: 1,
+  '7d': 7,
+  '1m': 30,
+  '6m': 180,
+  '1y': 365,
+}
+
 // Lucide-style line icons for the top-of-Overview KPI tiles.
 const IconDollar = (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -211,19 +220,26 @@ export function OverviewTab({ agg, period, onPeriodChange, settings }: {
         />
       </section>
 
-      <section className="chart-card">
-        <div className="chart-card-head">
-          <span className="chart-card-title">Daily spend · last 14d</span>
-          <span className="chart-card-sub">
-            peak {microToUsd(agg.dailyCostMicroUsd.reduce((a, b) => (a > b ? a : b), 0n))}
-          </span>
-        </div>
-        <AreaChart values={agg.dailyCostMicroUsd} />
-        <div className="chart-axis">
-          <span>14d ago</span>
-          <span>today</span>
-        </div>
-      </section>
+      {(() => {
+        const days = PERIOD_DAYS[period]
+        const series = agg.dailyCostMicroUsd.slice(-days)
+        const peak = series.reduce((a, b) => (a > b ? a : b), 0n)
+        return (
+          <section className="chart-card">
+            <div className="chart-card-head">
+              <span className="chart-card-title">
+                {period === 'today' ? 'Daily spend · today' : `Daily spend · last ${days}d`}
+              </span>
+              <span className="chart-card-sub">peak {microToUsd(peak)}</span>
+            </div>
+            <AreaChart values={series} />
+            <div className="chart-axis">
+              <span>{period === 'today' ? 'today' : `${days}d ago`}</span>
+              <span>today</span>
+            </div>
+          </section>
+        )
+      })()}
 
       {agg.forecast !== null ? (
         <section className="forecast-card">

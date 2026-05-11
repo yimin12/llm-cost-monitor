@@ -123,10 +123,20 @@ const fakeSnapshot: AggregateSnapshot = {
       spentMicroUsd: usd(2.34), estimateMicroUsd: usd(10.36), confidenceBandMicroUsd: usd(1.1),
     },
   },
-  dailyCostMicroUsd: [
-    usd(0.8), usd(2.1), usd(3.4), usd(1.2), usd(0.5), usd(2.8), usd(4.7),
-    usd(3.2), usd(5.1), usd(2.6), usd(1.9), usd(3.7), usd(6.2), usd(4.27),
-  ],
+  // 365 oldest-first entries — renderer slices the last N based on the
+  // selected period. Deterministic pseudo-random walk so the fake demo
+  // doesn't redraw flat zeros for older buckets but stays stable across
+  // reloads of the same fixture.
+  dailyCostMicroUsd: ((): bigint[] => {
+    const out: bigint[] = []
+    for (let i = 0; i < 365; i += 1) {
+      // sine envelope + small high-frequency wobble, $0-$8 range
+      const base = 4 + 3 * Math.sin((i / 11) * Math.PI)
+      const wobble = ((i * 9301 + 49297) % 233280) / 233280 // [0,1)
+      out.push(usd(Math.max(0, base + (wobble - 0.5) * 2.4)))
+    }
+    return out
+  })(),
   providerLastSeen: {
     anthropic: Date.now() - 2 * 60_000,
     openai: Date.now() - 14 * 60_000,
