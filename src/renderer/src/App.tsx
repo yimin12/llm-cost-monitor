@@ -426,8 +426,3 @@ function TabLabel({ k }: { k: MessageKey }): JSX.Element {
   return <>{t(k)}</>
 }
 
-// Same pattern for the header refresh button.
-function RefreshLabel({ refreshing }: { refreshing: boolean }): JSX.Element {
-  const { t } = useT()
-  return <>{refreshing ? t('refreshing') : t('refresh')}</>
-}
