@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 import type pg from 'pg'
 
 import type {
@@ -6,6 +8,7 @@ import type {
   SyncedEventV1,
   SyncPayload,
 } from '../src/shared/sync'
+import { syncEventIdInput } from '../src/shared/sync'
 import type {
   TeamMemberUsage,
   TeamNodeStatus,
@@ -209,7 +212,8 @@ export class TeamService {
     const rejected: { sync_event_id: string; reason: string }[] = []
     let maxTimestamp = 0
 
-    // Cache memberships per (team, user) inside this batch.
+    // Cache memberships per (team, user) inside this batch. 500 payloads
+    // from the same user collapse to one membership lookup.
     const memberships = new Map<string, MemberStatus>()
     const checkMember = async (userId: string): Promise<MemberStatus | null> => {
       const k = `${teamId}|${userId}`
@@ -221,41 +225,64 @@ export class TeamService {
       return v
     }
 
+    // Stable batch timestamp so every node row in this transaction agrees
+    // on last_seen_at — clock skew inside a batch is meaningless.
+    const batchNow = BigInt(Date.now())
+    const touchedNodes = new Set<string>()
+
+    const idOf = (p: SyncPayload): string =>
+      p.kind === 'event' ? p.sync_event_id : `${p.date}|${p.provider}|${p.model}`
+
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
 
       for (const p of payloads) {
         if (p.team_id !== teamId) {
-          rejected.push({
-            sync_event_id: p.kind === 'event' ? p.sync_event_id : `${p.date}|${p.provider}|${p.model}`,
-            reason: 'team_id mismatch with URL',
-          })
-          continue
-        }
-        const memberStatus = await checkMember(p.user_id)
-        if (memberStatus === null) {
-          rejected.push({
-            sync_event_id: p.kind === 'event' ? p.sync_event_id : `${p.date}|${p.provider}|${p.model}`,
-            reason: 'user is not a member of this team',
-          })
-          continue
-        }
-        if (memberStatus !== 'active') {
-          rejected.push({
-            sync_event_id: p.kind === 'event' ? p.sync_event_id : `${p.date}|${p.provider}|${p.model}`,
-            reason: `membership is ${memberStatus}`,
-          })
+          rejected.push({ sync_event_id: idOf(p), reason: 'team_id mismatch with URL' })
           continue
         }
 
-        // Touch node row.
-        await client.query(
-          `INSERT INTO nodes (id, user_id, team_id, enrolled_at, last_seen_at)
-           VALUES ($1, $2, $3, $4, $4)
-           ON CONFLICT (id) DO UPDATE SET last_seen_at = EXCLUDED.last_seen_at`,
-          [p.node_id, p.user_id, teamId, BigInt(Date.now())],
-        )
+        // sync_event_id forgery guard: recompute the canonical hash and
+        // reject when the client-submitted id doesn't match. Cheap (one
+        // sha256 per event) and stops a compromised node from squatting
+        // another node's id space. Only applies to event-kind payloads;
+        // daily buckets are dedup'd by their composite PK.
+        if (p.kind === 'event') {
+          const expected = createHash('sha256')
+            .update(syncEventIdInput(teamId, p.user_id, p.node_id, p.local_event_id))
+            .digest('hex')
+          if (expected !== p.sync_event_id) {
+            rejected.push({
+              sync_event_id: p.sync_event_id,
+              reason: 'sync_event_id mismatch — recomputed hash differs',
+            })
+            continue
+          }
+        }
+
+        const memberStatus = await checkMember(p.user_id)
+        if (memberStatus === null) {
+          rejected.push({ sync_event_id: idOf(p), reason: 'user is not a member of this team' })
+          continue
+        }
+        if (memberStatus !== 'active') {
+          rejected.push({ sync_event_id: idOf(p), reason: `membership is ${memberStatus}` })
+          continue
+        }
+
+        // Touch each unique node at most once per batch. 500 payloads from
+        // one node collapse to one INSERT…ON CONFLICT instead of 500.
+        const nodeKey = `${p.user_id}|${p.node_id}`
+        if (!touchedNodes.has(nodeKey)) {
+          touchedNodes.add(nodeKey)
+          await client.query(
+            `INSERT INTO nodes (id, user_id, team_id, enrolled_at, last_seen_at)
+             VALUES ($1, $2, $3, $4, $4)
+             ON CONFLICT (id) DO UPDATE SET last_seen_at = EXCLUDED.last_seen_at`,
+            [p.node_id, p.user_id, teamId, batchNow],
+          )
+        }
 
         if (p.kind === 'event') {
           const acceptedFlag = await this.upsertEvent(client, p)

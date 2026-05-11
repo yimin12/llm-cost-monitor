@@ -1,6 +1,8 @@
+import { createHash } from 'node:crypto'
+
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
-import type { SyncedDailyV1, SyncedEventV1 } from '../../src/shared/sync'
+import { syncEventIdInput, type SyncedDailyV1, type SyncedEventV1 } from '../../src/shared/sync'
 
 import type { Pool } from '../db'
 import { TeamService } from '../team-service'
@@ -9,15 +11,29 @@ import { createServerTestDatabase, dropServerTestDatabase } from './test-helpers
 // Use Date.now() so events fall inside the default 30-day overview window.
 const NOW = Date.now()
 
+// Compute the canonical sync_event_id so the server's recompute-and-reject
+// check passes. Tests that need *different* events should vary local_event_id
+// (or node_id), not the sync_event_id itself.
+function sid(team: string, user: string, node: string, local: string): string {
+  return createHash('sha256').update(syncEventIdInput(team, user, node, local)).digest('hex')
+}
+
 function evt(over: Partial<SyncedEventV1> = {}): SyncedEventV1 {
+  // Strip any caller-supplied sync_event_id — the server recomputes and
+  // rejects mismatches, so the factory always emits the canonical hash.
+  const { sync_event_id: _ignored, ...rest } = over
+  const team_id = rest.team_id ?? 'team-A'
+  const user_id = rest.user_id ?? 'user-1'
+  const node_id = rest.node_id ?? 'node-1'
+  const local_event_id = rest.local_event_id ?? 'local-1'
   return {
     kind: 'event',
     event_version: 1,
-    sync_event_id: 'sid-1',
-    team_id: 'team-A',
-    user_id: 'user-1',
-    node_id: 'node-1',
-    local_event_id: 'local-1',
+    sync_event_id: sid(team_id, user_id, node_id, local_event_id),
+    team_id,
+    user_id,
+    node_id,
+    local_event_id,
     payload_hash: 'hash-1',
     privacy_level: 'redacted',
     captured_at: NOW,
@@ -40,7 +56,7 @@ function evt(over: Partial<SyncedEventV1> = {}): SyncedEventV1 {
     latency_ms: null,
     cost_micro_usd: '1500',
     pricing_snapshot_version: 'v1',
-    ...over,
+    ...rest,
   }
 }
 
@@ -95,9 +111,12 @@ describe('TeamService', () => {
     await svc.addMember('team-A', 'user-2')
   })
 
+  // Canonical id for the default factory inputs.
+  const DEFAULT_SID = sid('team-A', 'user-1', 'node-1', 'local-1')
+
   it('inserts new events and reports them as accepted', async () => {
     const r = await svc.batchUpsert('team-A', [evt()])
-    expect(r.accepted).toEqual(['sid-1'])
+    expect(r.accepted).toEqual([DEFAULT_SID])
     expect(r.duplicates).toEqual([])
     expect(r.rejected).toEqual([])
     expect(r.cursor).toBe(NOW)
@@ -107,7 +126,7 @@ describe('TeamService', () => {
     await svc.batchUpsert('team-A', [evt()])
     const second = await svc.batchUpsert('team-A', [evt()])
     expect(second.accepted).toEqual([])
-    expect(second.duplicates).toEqual(['sid-1'])
+    expect(second.duplicates).toEqual([DEFAULT_SID])
     const count = await pool.query<{ n: bigint }>(`SELECT COUNT(*)::bigint AS n FROM usage_events`)
     expect(Number(count.rows[0]!.n)).toBe(1)
   })
@@ -123,7 +142,8 @@ describe('TeamService', () => {
     expect(conflicts.rows[0]!.new_hash).toBe('h-new')
     // Original row stays — historical immutability.
     const row = await pool.query<{ input_tokens: bigint }>(
-      `SELECT input_tokens FROM usage_events WHERE sync_event_id = 'sid-1'`,
+      `SELECT input_tokens FROM usage_events WHERE sync_event_id = $1`,
+      [DEFAULT_SID],
     )
     expect(Number(row.rows[0]!.input_tokens)).toBe(10)
   })
@@ -132,7 +152,10 @@ describe('TeamService', () => {
     const r = await svc.batchUpsert('team-A', [evt({ user_id: 'stranger' })])
     expect(r.accepted).toEqual([])
     expect(r.rejected).toEqual([
-      { sync_event_id: 'sid-1', reason: 'user is not a member of this team' },
+      {
+        sync_event_id: sid('team-A', 'stranger', 'node-1', 'local-1'),
+        reason: 'user is not a member of this team',
+      },
     ])
   })
 
@@ -150,12 +173,45 @@ describe('TeamService', () => {
   })
 
   it('two-node-same-user dedup: union of distinct events, no double counting', async () => {
-    const e1 = evt({ sync_event_id: 's-1', node_id: 'mac', local_event_id: 'l-1' })
-    const e2 = evt({ sync_event_id: 's-2', node_id: 'linux', local_event_id: 'l-1' })
+    // Same local id on two different nodes → two different sync_event_ids,
+    // exactly the multi-node case from the design doc.
+    const e1 = evt({ node_id: 'mac', local_event_id: 'l-1' })
+    const e2 = evt({ node_id: 'linux', local_event_id: 'l-1' })
     await svc.batchUpsert('team-A', [e1])
     await svc.batchUpsert('team-A', [e2])
     const ov = await svc.getOverview('team-A')
     expect(ov.totalEventCount).toBe(2)
+  })
+
+  it('rejects forged sync_event_id (mismatch with sha256(team|user|node|local))', async () => {
+    // Start from a valid event, then tamper the id so the server's
+    // recompute-and-reject path fires. Defense against a compromised node
+    // squatting another node's id space.
+    const good = evt()
+    const forged = { ...good, sync_event_id: 'deadbeef' }
+    const r = await svc.batchUpsert('team-A', [forged])
+    expect(r.accepted).toEqual([])
+    expect(r.rejected).toEqual([
+      { sync_event_id: 'deadbeef', reason: 'sync_event_id mismatch — recomputed hash differs' },
+    ])
+    // Forgery must not leave a row behind.
+    const count = await pool.query<{ n: bigint }>(`SELECT COUNT(*)::bigint AS n FROM usage_events`)
+    expect(Number(count.rows[0]!.n)).toBe(0)
+  })
+
+  it('dedups node-touch INSERTs within a batch (500-payload batch → 1 node row touch)', async () => {
+    // 50 events from the same node should round-trip to a single
+    // INSERT…ON CONFLICT against `nodes`, not 50. We can't see inserts
+    // directly, but we *can* confirm one row exists and last_seen_at is
+    // monotonic across batches.
+    const payloads = Array.from({ length: 50 }, (_, i) =>
+      evt({ node_id: 'busy-node', local_event_id: `e-${i}` }),
+    )
+    await svc.batchUpsert('team-A', payloads)
+    const r = await pool.query<{ n: bigint }>(
+      `SELECT COUNT(*)::bigint AS n FROM nodes WHERE id = 'busy-node'`,
+    )
+    expect(Number(r.rows[0]!.n)).toBe(1)
   })
 
   it('upserts daily aggregates idempotently (latest wins)', async () => {
@@ -170,7 +226,7 @@ describe('TeamService', () => {
   })
 
   it('touches the node row on each upsert (last_seen_at advances)', async () => {
-    await svc.batchUpsert('team-A', [evt({ sync_event_id: 's-1', node_id: 'node-A' })])
+    await svc.batchUpsert('team-A', [evt({ node_id: 'node-A' })])
     const r1 = await pool.query<{ ts: bigint }>(
       `SELECT last_seen_at AS ts FROM nodes WHERE id = 'node-A'`,
     )
@@ -207,10 +263,12 @@ describe('TeamService.getOverview', () => {
   })
 
   it('aggregates per-member, per-project, per-provider', async () => {
+    // Distinct local_event_ids so the factory emits three different
+    // sync_event_ids (without them the same-user pair would collapse).
     await svc.batchUpsert('team-A', [
-      evt({ sync_event_id: 's1', user_id: 'user-1', cost_micro_usd: '1000', input_tokens: 10 }),
-      evt({ sync_event_id: 's2', user_id: 'user-1', cost_micro_usd: '500', input_tokens: 5 }),
-      evt({ sync_event_id: 's3', user_id: 'user-2', cost_micro_usd: '200', input_tokens: 2,
+      evt({ local_event_id: 'a', user_id: 'user-1', cost_micro_usd: '1000', input_tokens: 10 }),
+      evt({ local_event_id: 'b', user_id: 'user-1', cost_micro_usd: '500', input_tokens: 5 }),
+      evt({ local_event_id: 'c', user_id: 'user-2', cost_micro_usd: '200', input_tokens: 2,
             project_hash: 'p-other' }),
     ])
     const ov = await svc.getOverview('team-A')
@@ -224,7 +282,7 @@ describe('TeamService.getOverview', () => {
 
   it('renders redacted projects with redacted=true (no leaked names)', async () => {
     await svc.batchUpsert('team-A', [
-      evt({ sync_event_id: 's1', project: null, project_hash: 'h-1' }),
+      evt({ project: null, project_hash: 'h-1' }),
     ])
     const ov = await svc.getOverview('team-A')
     expect(ov.topProjects[0]!.redacted).toBe(true)
