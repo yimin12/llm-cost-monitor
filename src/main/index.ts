@@ -214,10 +214,6 @@ async function updateTrayPresentation(): Promise<void> {
 const updateTrayTitle = updateTrayPresentation
 
 void app.whenReady().then(async () => {
-  if (process.platform === 'darwin') {
-    app.dock?.hide()
-  }
-
   pricing = loadBundledPricing()
   console.log(
     `pricing snapshot ${pricing.snapshotVersion}, ${pricing.modelCount} models loaded`,
@@ -376,8 +372,15 @@ void app.whenReady().then(async () => {
 
   baseTrayIcon = getBaseTrayIcon()
   tray = new Tray(baseTrayIcon)
+  console.log(
+    `tray registered (icon empty=${baseTrayIcon.isEmpty()}, size=${JSON.stringify(baseTrayIcon.getSize())})`,
+  )
   if (process.platform === 'darwin') {
     tray.setTitle('$0.00')
+    // Setting activation policy *after* Tray creation. Calling dock.hide()
+    // (or transitioning to accessory) before the Tray exists can suppress
+    // the menubar icon on macOS.
+    app.setActivationPolicy('accessory')
   } else {
     tray.setToolTip('devbar')
   }
