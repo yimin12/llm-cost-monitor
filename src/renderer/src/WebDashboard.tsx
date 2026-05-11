@@ -51,6 +51,14 @@ const PERIOD_LABEL: Record<Period, string> = {
   '6m': '6m',
   '1y': '1y',
 }
+// Daily-spend chart slices the last N entries of dailyCostMicroUsd.
+const PERIOD_DAYS: Record<Period, number> = {
+  today: 1,
+  '7d': 7,
+  '1m': 30,
+  '6m': 180,
+  '1y': 365,
+}
 // TeamOverview.cost fields arrive as strings from the server (bigint
 // preservation). Convert defensively so a malformed payload renders as 0
 // rather than crashing the page.
@@ -348,24 +356,33 @@ export function WebDashboard(): JSX.Element {
             all of that duplicated tray-panel content, so it's been
             removed. Drill into a provider for the per-vendor breakdown
             via its row in the Provider Catalog below. */}
-        <section className="web-card">
-          <header className="web-card-head">
-            <div>
-              <h2>Daily spend</h2>
-              <p>Last 14 days — micro-USD per local calendar day.</p>
-            </div>
-            <span className="web-card-meta">
-              peak {microToUsd(agg.dailyCostMicroUsd.reduce((a, b) => (a > b ? a : b), 0n))}
-            </span>
-          </header>
-          <div className="web-chart-host">
-            <AreaChart values={agg.dailyCostMicroUsd} />
-          </div>
-          <footer className="web-chart-axis">
-            <span>14 days ago</span>
-            <span>today</span>
-          </footer>
-        </section>
+        {(() => {
+          const days = PERIOD_DAYS[period]
+          const series = agg.dailyCostMicroUsd.slice(-days)
+          const peak = series.reduce((a, b) => (a > b ? a : b), 0n)
+          return (
+            <section className="web-card">
+              <header className="web-card-head">
+                <div>
+                  <h2>Daily spend</h2>
+                  <p>
+                    {period === 'today'
+                      ? 'Today — micro-USD spent so far.'
+                      : `Last ${days} days — micro-USD per local calendar day.`}
+                  </p>
+                </div>
+                <span className="web-card-meta">peak {microToUsd(peak)}</span>
+              </header>
+              <div className="web-chart-host">
+                <AreaChart values={series} />
+              </div>
+              <footer className="web-chart-axis">
+                <span>{period === 'today' ? 'today' : `${days} days ago`}</span>
+                <span>today</span>
+              </footer>
+            </section>
+          )
+        })()}
 
         {/* Forecast — total + per-provider breakdown */}
         {agg.forecast !== null && (
