@@ -1,21 +1,15 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
-import type { AppSettings } from '@shared/ipc-channels'
+import type { AppSettings, YieldScoreSnapshot } from '@shared/ipc-channels'
 
-// "Yield Score" — total AI cost ÷ number of git commits over a
-// rolling window. Visual shell ONLY in this PR — the back-end git
-// scanner + commit storage + aggregator wiring is the follow-up PR.
+import { microToUsd } from '../lib/format'
+
+// Yield Score = total AI cost ÷ git commits over a rolling window.
 //
-// Today the card surfaces:
-//   - an empty state pointing at Settings → Privacy when the
-//     `trackGitActivity` toggle is off (matches CLI Pulse's
-//     opt-in pattern);
-//   - a "no commits captured yet" empty state when the toggle is
-//     on but the scanner hasn't found anything yet.
-//
-// Once the scanner is wired, this component will gain a real number
-// + sparkline. The period selector below is already wired to a
-// local useState so the future hookup is a one-line query change.
+// When `settings.privacy.trackGitActivity` is on, the renderer pulls a
+// snapshot from the main process (which runs the git scanner +
+// queries usage_events for the same window). When off, the card
+// renders the opt-in CTA without ever calling the IPC.
 
 type Period = '7d' | '30d' | '90d'
 
@@ -25,13 +19,34 @@ const PERIOD_LABEL: Record<Period, string> = {
   '90d': 'Last 90 days',
 }
 
+function microPerCommitDisplay(microPerCommit: string | null): string {
+  if (microPerCommit === null) return '—'
+  // micro USD → dollars with 2 decimals (commits-per-day means cost
+  // is usually in the cents–dollars range; 4 decimals would be noisy).
+  const cents = Number(BigInt(microPerCommit) / 10_000n) / 100
+  if (Math.abs(cents) >= 100) return `$${cents.toFixed(1)}`
+  return `$${cents.toFixed(2)}`
+}
+
 export function YieldScoreCard({
   settings,
 }: {
   settings: AppSettings | null
 }): JSX.Element {
   const [period, setPeriod] = useState<Period>('30d')
+  const [snap, setSnap] = useState<YieldScoreSnapshot | null>(null)
   const enabled = settings?.privacy?.trackGitActivity === true
+
+  const reload = useCallback(async () => {
+    setSnap(null)
+    const r = await window.api.yieldScore(period)
+    setSnap(r)
+  }, [period])
+
+  useEffect(() => {
+    if (enabled) void reload()
+    else setSnap(null)
+  }, [enabled, period, reload])
 
   return (
     <section className="yield-card">
@@ -57,20 +72,71 @@ export function YieldScoreCard({
           ))}
         </select>
       </header>
-      {enabled ? (
-        <div className="yield-card-empty">
-          <p>No commits captured yet for the {PERIOD_LABEL[period].toLowerCase()} window.</p>
-          <p className="yield-card-sub">
-            The git scanner will pick up new commits on the next refresh tick.
-          </p>
-        </div>
-      ) : (
+
+      {!enabled && (
         <div className="yield-card-empty">
           <p>Track AI cost per commit to see your yield score.</p>
           <p className="yield-card-sub">
             Enable in <strong>Settings → Privacy → Track git activity</strong>.
           </p>
         </div>
+      )}
+
+      {enabled && snap === null && (
+        <div className="yield-card-empty">
+          <p>scanning your repos…</p>
+        </div>
+      )}
+
+      {enabled && snap !== null && snap.totalCommits === 0 && (
+        <div className="yield-card-empty">
+          <p>No commits in the {PERIOD_LABEL[period].toLowerCase()} window.</p>
+          <p className="yield-card-sub">
+            Scanned {snap.repos.length} repo{snap.repos.length === 1 ? '' : 's'} under your home
+            directory in {snap.durationMs}ms.
+          </p>
+        </div>
+      )}
+
+      {enabled && snap !== null && snap.totalCommits > 0 && (
+        <>
+          <div className="yield-kpis">
+            <div className="yield-kpi yield-kpi-hero">
+              <span className="yield-kpi-label">cost / commit</span>
+              <span className="yield-kpi-value">{microPerCommitDisplay(snap.microPerCommit)}</span>
+            </div>
+            <div className="yield-kpi">
+              <span className="yield-kpi-label">total cost</span>
+              <span className="yield-kpi-value">{microToUsd(BigInt(snap.costMicroUsd))}</span>
+            </div>
+            <div className="yield-kpi">
+              <span className="yield-kpi-label">commits</span>
+              <span className="yield-kpi-value">
+                {snap.totalCommits}
+                {snap.totalMerges > 0 && (
+                  <span className="yield-kpi-sub"> · {snap.totalMerges} merge{snap.totalMerges === 1 ? '' : 's'}</span>
+                )}
+              </span>
+            </div>
+          </div>
+
+          <details className="yield-breakdown">
+            <summary>
+              {snap.repos.length} active repo{snap.repos.length === 1 ? '' : 's'} this window
+            </summary>
+            <ul className="yield-repo-list">
+              {snap.repos.slice(0, 8).map((r) => (
+                <li key={r.path}>
+                  <span className="yield-repo-name" title={r.path}>{r.name}</span>
+                  <span className="yield-repo-count">{r.commits}</span>
+                </li>
+              ))}
+              {snap.repos.length > 8 && (
+                <li className="yield-repo-more">+ {snap.repos.length - 8} more</li>
+              )}
+            </ul>
+          </details>
+        </>
       )}
     </section>
   )

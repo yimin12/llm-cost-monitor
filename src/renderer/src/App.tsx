@@ -14,6 +14,7 @@ import type {
   TeamManageResult,
   TeamMemberRole,
   TeamOverview,
+  YieldScoreSnapshot,
 } from '@shared/ipc-channels'
 import type { PrivacyLevel } from '@shared/sync'
 
@@ -70,6 +71,7 @@ declare global {
       teamRevokeMember: (userId: string) => Promise<TeamManageResult>
       teamSetMemberRole: (userId: string, role: TeamMemberRole) => Promise<TeamManageResult>
       teamSetPrivacyFloor: (level: PrivacyLevel) => Promise<TeamManageResult>
+      yieldScore: (period: '7d' | '30d' | '90d') => Promise<YieldScoreSnapshot>
     }
   }
 }

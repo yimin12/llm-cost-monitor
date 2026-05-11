@@ -17,6 +17,7 @@ import {
   type TeamManageResult,
   type TeamMemberRole,
   type TeamOverview,
+  type YieldScoreSnapshot,
 } from '@shared/ipc-channels'
 import type { PrivacyLevel } from '@shared/sync'
 
@@ -98,6 +99,9 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke(IPC.TEAM_SET_MEMBER_ROLE, userId, role) as Promise<TeamManageResult>,
   teamSetPrivacyFloor: (level: PrivacyLevel): Promise<TeamManageResult> =>
     ipcRenderer.invoke(IPC.TEAM_SET_PRIVACY_FLOOR, level) as Promise<TeamManageResult>,
+
+  yieldScore: (period: '7d' | '30d' | '90d'): Promise<YieldScoreSnapshot> =>
+    ipcRenderer.invoke(IPC.YIELD_SCORE, period) as Promise<YieldScoreSnapshot>,
 
   onSyncStatusChanged: (cb: (s: SyncStatus | null) => void): (() => void) => {
     const listener = (_e: unknown, s: SyncStatus | null): void => cb(s)

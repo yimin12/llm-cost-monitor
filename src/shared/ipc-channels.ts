@@ -27,6 +27,9 @@ export const IPC = {
   TEAM_REVOKE_MEMBER: 'team:revoke-member',
   TEAM_SET_MEMBER_ROLE: 'team:set-member-role',
   TEAM_SET_PRIVACY_FLOOR: 'team:set-privacy-floor',
+  // Yield Score: scans git repos under ~ and pairs the commit count
+  // with usage cost in the period. Renderer triggers on card mount.
+  YIELD_SCORE: 'yield:score',
   // Returns the dev-server URL that the same renderer is served at, or null
   // in production builds where the renderer is loaded via file://. The
   // renderer uses this to surface a "Open in browser" link from the tray.
@@ -123,6 +126,33 @@ export interface TeamNodeStatus {
 export type TeamManageResult =
   | { ok: true }
   | { ok: false; status: number; error: string; message?: string }
+
+// Yield Score scanner result. costMicroUsd is the bigint cost summed
+// over the period as a string (preserves precision through IPC).
+export interface YieldRepoStat {
+  path: string
+  name: string
+  commits: number
+  merges: number
+}
+export interface YieldScoreSnapshot {
+  period: '7d' | '30d' | '90d'
+  windowStartMs: number
+  generatedAt: number
+  durationMs: number
+  totalCommits: number
+  totalMerges: number
+  costMicroUsd: string
+  /** total cost ÷ totalCommits, expressed in micro USD per commit.
+   *  null when totalCommits === 0 (renderer renders an empty state). */
+  microPerCommit: string | null
+  /** Per-repo breakdown sorted by activity. */
+  repos: YieldRepoStat[]
+  /** True when settings.privacy.trackGitActivity is on. Renderer uses
+   *  this to differentiate the "off" empty state from the "no commits
+   *  found in window" empty state. */
+  enabled: boolean
+}
 
 export interface TeamOverview {
   teamId: string
