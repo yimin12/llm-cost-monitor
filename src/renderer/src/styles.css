@@ -954,51 +954,68 @@ body {
 }
 .yield-card-empty strong { color: rgba(var(--fg), 0.95); font-weight: 600; }
 
-/* CLI-Pulse-style sparse KPI tiles: small icon + UPPERCASE label
-   above a large value, optionally a small subtitle. Three per row. */
-.yield-tiles {
+/* CLI-Pulse-style sparse KPI tile primitive — shared by Yield Score,
+   TODAY hero, and any future panel that wants the same look. Three
+   visual rows (icon+label / value / optional sub), each row stays
+   single-line so tiles in the same grid always line up. */
+.kpi-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
   gap: 8px;
 }
-.yield-tile {
+.kpi-grid-3 { grid-template-columns: repeat(3, 1fr); }
+.kpi-grid-4 { grid-template-columns: repeat(4, 1fr); }
+
+.kpi-tile {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   text-align: center;
   gap: 6px;
-  padding: 12px 10px;
+  padding: 10px 8px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 9px;
   min-width: 0;
 }
-.yield-tile-head {
+.kpi-tile-head {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 5px;
 }
-.yield-tile-icon { display: inline-flex; flex-shrink: 0; }
-.yield-tile-label {
+.kpi-tile-icon { display: inline-flex; flex-shrink: 0; }
+.kpi-tile-label {
   font-size: 10px;
   font-weight: 600;
   color: rgba(var(--fg), 0.65);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
-.yield-tile-value {
+.kpi-tile-value {
   font-size: 18px;
   font-weight: 700;
   color: rgba(var(--fg), 0.98);
   font-variant-numeric: tabular-nums;
   line-height: 1.15;
   text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
-.yield-tile-sub {
+.kpi-tile-sub {
   font-size: 10px;
   color: rgba(var(--fg), 0.45);
   text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  min-height: 14px; /* reserve space so tiles without a sub stay
+                       aligned with tiles that do */
 }
 
 /* ─── Settings row (label + help text + switch) ─── */

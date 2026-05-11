@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 
 import type { AppSettings, YieldScoreSnapshot } from '@shared/ipc-channels'
 
+import { KpiTile } from './KpiTile'
+
 // Yield Score card. CLI-Pulse-style sparse KPI grid — each tile is
 // "small icon + short label (UPPERCASE) + big value". Three tiles
 // (cost/commit · commits · active repos) keep the card legible at
@@ -21,27 +23,6 @@ function microPerCommitDisplay(microPerCommit: string | null): string {
   const cents = Number(BigInt(microPerCommit) / 10_000n) / 100
   if (Math.abs(cents) >= 100) return `$${cents.toFixed(1)}`
   return `$${cents.toFixed(2)}`
-}
-
-interface TileProps {
-  icon: JSX.Element
-  iconColor: string
-  label: string
-  value: string
-  sub?: string | undefined
-}
-
-function Tile({ icon, iconColor, label, value, sub }: TileProps): JSX.Element {
-  return (
-    <div className="yield-tile">
-      <div className="yield-tile-head">
-        <span className="yield-tile-icon" style={{ color: iconColor }}>{icon}</span>
-        <span className="yield-tile-label">{label}</span>
-      </div>
-      <div className="yield-tile-value">{value}</div>
-      {sub !== undefined && <div className="yield-tile-sub">{sub}</div>}
-    </div>
-  )
 }
 
 // Lucide-style line icons sized for the small tile head.
@@ -125,15 +106,15 @@ export function YieldScoreCard({
       )}
 
       {enabled && (
-        <div className="yield-tiles">
-          <Tile
+        <div className="kpi-grid kpi-grid-3">
+          <KpiTile
             icon={IconCoin}
             iconColor="rgba(120, 200, 140, 0.95)"
             label="Cost / commit"
             value={microPerCommitDisplay(snap?.microPerCommit ?? null)}
-            sub={snap !== null && snap.totalCommits === 0 ? 'no commits yet' : undefined}
+            sub={snap !== null && snap.totalCommits === 0 ? 'no commits' : ' '}
           />
-          <Tile
+          <KpiTile
             icon={IconGitCommit}
             iconColor="rgba(120, 170, 255, 0.95)"
             label="Commits"
@@ -141,15 +122,15 @@ export function YieldScoreCard({
             sub={
               snap !== null && snap.totalMerges > 0
                 ? `${snap.totalMerges} merge${snap.totalMerges === 1 ? '' : 's'}`
-                : undefined
+                : ' '
             }
           />
-          <Tile
+          <KpiTile
             icon={IconFolder}
             iconColor="rgba(255, 180, 120, 0.95)"
             label="Repos"
             value={snap?.repos.length.toString() ?? '—'}
-            sub={snap !== null ? 'active this window' : undefined}
+            sub="active"
           />
         </div>
       )}

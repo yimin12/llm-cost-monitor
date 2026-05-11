@@ -2,6 +2,7 @@ import type { AggregateSnapshot, CostByModel, CostByProject, CostByProvider } fr
 import type { AppSettings } from '@shared/ipc-channels'
 
 import { AreaChart, ShareBar, useAnimatedNumber } from '../components/charts'
+import { KpiTile } from '../components/KpiTile'
 import { YieldScoreCard } from '../components/YieldScoreCard'
 import { formatTokens, microToUsd, providerColor, providerName } from '../lib/format'
 
@@ -95,6 +96,38 @@ const PERIOD_BY_PROVIDER: Record<Exclude<Period, 'today'>, keyof Pick<
   '1y': 'byProvider1y',
 }
 
+// Lucide-style line icons for the top-of-Overview KPI tiles.
+const IconDollar = (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M12 2v20M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+  </svg>
+)
+const IconActivity = (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+  </svg>
+)
+const IconTokens = (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <rect x="3" y="3" width="7" height="7" rx="1.5" />
+    <rect x="14" y="3" width="7" height="7" rx="1.5" />
+    <rect x="3" y="14" width="7" height="7" rx="1.5" />
+    <rect x="14" y="14" width="7" height="7" rx="1.5" />
+  </svg>
+)
+const IconProviders = (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <circle cx="6" cy="6" r="3" />
+    <circle cx="18" cy="6" r="3" />
+    <circle cx="12" cy="18" r="3" />
+    <path d="M8.5 7.5L11 16M15.5 7.5L13 16" />
+  </svg>
+)
+
 const PERIOD_LABEL: Record<Period, string> = {
   today: 'Today',
   '7d': '7d',
@@ -151,24 +184,31 @@ export function OverviewTab({ agg, period, onPeriodChange, settings }: {
         ))}
       </div>
 
-      <section className="hero">
-        <div className="hero-left">
-          <span className="hero-label">{period === 'today' ? 'Today' : `Last ${PERIOD_LABEL[period]}`}</span>
-          <span className="hero-value">{animatedDollarText}</span>
-          <div className="hero-meta">
-            <span className="meta-pill">
-              <span className="meta-pill-dot" /> {range.eventCount} calls
-            </span>
-            <span className="meta-pill">{formatTokens(tokens)} tokens</span>
-            {donutSlices.length > 0 && (
-              <span className="meta-pill">{donutSlices.length} providers</span>
-            )}
-          </div>
-        </div>
-        {/* Donut removed — only carried a single count ("3 providers")
-            already shown as a meta pill above, and the per-provider
-            breakdown lives in MONTH-END FORECAST + the By provider
-            block below. */}
+      <section className="kpi-grid kpi-grid-4 hero-tiles">
+        <KpiTile
+          icon={IconDollar}
+          iconColor="rgba(120, 200, 140, 0.95)"
+          label={period === 'today' ? 'Today' : `Last ${PERIOD_LABEL[period]}`}
+          value={animatedDollarText}
+        />
+        <KpiTile
+          icon={IconActivity}
+          iconColor="rgba(120, 170, 255, 0.95)"
+          label="Calls"
+          value={range.eventCount.toLocaleString()}
+        />
+        <KpiTile
+          icon={IconTokens}
+          iconColor="rgba(167, 139, 250, 0.95)"
+          label="Tokens"
+          value={formatTokens(tokens)}
+        />
+        <KpiTile
+          icon={IconProviders}
+          iconColor="rgba(255, 180, 120, 0.95)"
+          label="Providers"
+          value={String(donutSlices.length)}
+        />
       </section>
 
       <section className="chart-card">
