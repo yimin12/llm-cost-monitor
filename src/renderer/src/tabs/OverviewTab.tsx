@@ -2,7 +2,7 @@ import type { AggregateSnapshot, CostByModel, CostByProject, CostByProvider } fr
 import type { AppSettings } from '@shared/ipc-channels'
 
 import { AreaChart, ShareBar, useAnimatedNumber } from '../components/charts'
-import { YieldScoreCard } from '../components/YieldScoreCard'
+import { YieldInline } from '../components/YieldInline'
 import { formatTokens, microToUsd, providerColor, providerName } from '../lib/format'
 
 function ProviderRows({ rows }: { rows: CostByProvider[] }): JSX.Element {
@@ -200,6 +200,8 @@ export function OverviewTab({ agg, period, onPeriodChange, settings }: {
             <span>~<strong>{microToUsd(agg.forecast.estimateMicroUsd)}</strong> est.</span>
           </div>
 
+          <YieldInline settings={settings} />
+
           {Object.keys(agg.forecastByProvider).length > 0 && (
             <ul className="forecast-by-provider">
               {Object.entries(agg.forecastByProvider)
@@ -237,8 +239,6 @@ export function OverviewTab({ agg, period, onPeriodChange, settings }: {
           <span>Need ≥ 3 days of usage this month to forecast.</span>
         </section>
       )}
-
-      <YieldScoreCard settings={settings} />
 
       <section className="block">
         <div className="block-head">
