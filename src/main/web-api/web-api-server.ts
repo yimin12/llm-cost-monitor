@@ -86,7 +86,7 @@ async function handle(
       return
 
     case '/v1/providers':
-      sendJson(res, 200, deps.providers.describe())
+      sendJson(res, 200, await deps.providers.describe())
       return
 
     case '/v1/pricing':
