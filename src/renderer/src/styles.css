@@ -859,6 +859,21 @@ body {
   height: 22px;
   border-width: 1px;
 }
+.auth-avatar-link {
+  display: inline-flex;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+  text-decoration: none;
+}
+.auth-avatar-link:hover {
+  transform: scale(1.06);
+  box-shadow: 0 0 0 2px rgba(99, 173, 255, 0.35);
+}
+.auth-avatar-link:focus-visible {
+  outline: 2px solid rgba(99, 173, 255, 0.6);
+  outline-offset: 2px;
+}
 .auth-header.auth-header-inline .auth-avatar-fallback {
   font-size: 11px;
 }

@@ -94,7 +94,20 @@ export function AuthHeader({ className }: AuthHeaderProps): JSX.Element {
   if (state.kind === 'signed-in') {
     return (
       <div className={`auth-header signed-in ${className ?? ''}`}>
-        <Avatar user={state.user} />
+        {/* Avatar opens the user's Google Account page in their default
+            browser. shell.openExternal is the right call for arbitrary
+            https targets, but here we lean on the plain anchor — the
+            Electron BrowserWindow forwards target="_blank" links to the
+            OS browser via the existing main-process handler. */}
+        <a
+          className="auth-avatar-link"
+          href="https://myaccount.google.com/"
+          target="_blank"
+          rel="noreferrer"
+          aria-label="Open Google Account"
+        >
+          <Avatar user={state.user} />
+        </a>
         <div className="auth-identity">
           {state.user.name !== null && (
             <span className="auth-name" title={state.user.name}>

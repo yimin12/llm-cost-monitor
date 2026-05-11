@@ -1,4 +1,4 @@
-import { app, Tray, BrowserWindow, screen } from 'electron'
+import { app, Tray, BrowserWindow, screen, shell } from 'electron'
 import path from 'path'
 
 import { Aggregator } from './aggregation/aggregator'
@@ -135,6 +135,16 @@ function createDropdownWindow(): BrowserWindow {
   } else {
     void win.loadFile(path.join(__dirname, '../renderer/index.html'))
   }
+  // Route all <a target="_blank"> + window.open('...') with an
+  // http(s) URL out to the user's default browser. Without this
+  // every external link would silently fail (or worse, open a new
+  // empty Electron window) — sandboxed by default.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//.test(url)) {
+      void shell.openExternal(url)
+    }
+    return { action: 'deny' }
+  })
   win.on('blur', () => win.hide())
   return win
 }
