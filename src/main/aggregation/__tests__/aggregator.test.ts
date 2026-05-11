@@ -135,7 +135,7 @@ describe('Aggregator (Postgres)', () => {
 
     expect(await agg.dailySeries(3, now)).toEqual([1000n, 0n, 5000n])
     const snap = await agg.snapshot(now)
-    expect(snap.dailyCostMicroUsd).toHaveLength(14)
+    expect(snap.dailyCostMicroUsd).toHaveLength(365)
   })
 
   it('providerLastSeen returns MAX(timestamp) per provider', async () => {

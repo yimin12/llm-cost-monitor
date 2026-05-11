@@ -64,7 +64,10 @@ const RANGE_COLUMNS = `
 `
 
 const DAY_MS = 24 * 60 * 60 * 1000
-const DAILY_SERIES_DAYS = 14
+// Daily series spans a full year so the renderer can slice to whatever
+// period the user picks (today / 7d / 1m / 6m / 1y) without a second
+// round-trip. 365 bigints is a few KB on the wire.
+const DAILY_SERIES_DAYS = 365
 const RECENT_SESSIONS_LIMIT = 50
 
 export class Aggregator {
