@@ -1,7 +1,7 @@
 import type { AggregateSnapshot, CostByModel, CostByProject, CostByProvider } from '@shared/aggregates'
 import type { AppSettings } from '@shared/ipc-channels'
 
-import { AreaChart, Donut, ShareBar, useAnimatedNumber } from '../components/charts'
+import { AreaChart, ShareBar, useAnimatedNumber } from '../components/charts'
 import { YieldScoreCard } from '../components/YieldScoreCard'
 import { formatTokens, microToUsd, providerColor, providerName } from '../lib/format'
 
@@ -160,13 +160,15 @@ export function OverviewTab({ agg, period, onPeriodChange, settings }: {
               <span className="meta-pill-dot" /> {range.eventCount} calls
             </span>
             <span className="meta-pill">{formatTokens(tokens)} tokens</span>
+            {donutSlices.length > 0 && (
+              <span className="meta-pill">{donutSlices.length} providers</span>
+            )}
           </div>
         </div>
-        <Donut
-          slices={donutSlices}
-          centerLabel="providers"
-          centerValue={String(donutSlices.length)}
-        />
+        {/* Donut removed — only carried a single count ("3 providers")
+            already shown as a meta pill above, and the per-provider
+            breakdown lives in MONTH-END FORECAST + the By provider
+            block below. */}
       </section>
 
       <section className="chart-card">

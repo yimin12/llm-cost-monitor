@@ -959,6 +959,9 @@ body {
   grid-template-columns: 1.4fr 1fr 1fr;
   gap: 8px;
 }
+.yield-kpis-2 {
+  grid-template-columns: 1.4fr 1fr;
+}
 .yield-kpi {
   display: flex;
   flex-direction: column;

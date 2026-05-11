@@ -2,8 +2,6 @@ import { useCallback, useEffect, useState } from 'react'
 
 import type { AppSettings, YieldScoreSnapshot } from '@shared/ipc-channels'
 
-import { microToUsd } from '../lib/format'
-
 // Yield Score = total AI cost ÷ git commits over a rolling window.
 //
 // When `settings.privacy.trackGitActivity` is on, the renderer pulls a
@@ -100,14 +98,13 @@ export function YieldScoreCard({
 
       {enabled && snap !== null && snap.totalCommits > 0 && (
         <>
-          <div className="yield-kpis">
+          {/* total-cost tile dropped — the same number is already in
+              MONTH-END FORECAST above (·"spent"). Keep the unique
+              ratio + commit count here. */}
+          <div className="yield-kpis yield-kpis-2">
             <div className="yield-kpi yield-kpi-hero">
               <span className="yield-kpi-label">cost / commit</span>
               <span className="yield-kpi-value">{microPerCommitDisplay(snap.microPerCommit)}</span>
-            </div>
-            <div className="yield-kpi">
-              <span className="yield-kpi-label">total cost</span>
-              <span className="yield-kpi-value">{microToUsd(BigInt(snap.costMicroUsd))}</span>
             </div>
             <div className="yield-kpi">
               <span className="yield-kpi-label">commits</span>
