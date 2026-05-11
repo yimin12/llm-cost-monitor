@@ -2,12 +2,11 @@ import { useCallback, useEffect, useState } from 'react'
 
 import type { AppSettings, YieldScoreSnapshot } from '@shared/ipc-channels'
 
-// Yield Score = total AI cost ÷ git commits over a rolling window.
-//
-// When `settings.privacy.trackGitActivity` is on, the renderer pulls a
-// snapshot from the main process (which runs the git scanner +
-// queries usage_events for the same window). When off, the card
-// renders the opt-in CTA without ever calling the IPC.
+// Yield Score card. CLI-Pulse-style sparse KPI grid — each tile is
+// "small icon + short label (UPPERCASE) + big value". Three tiles
+// (cost/commit · commits · active repos) keep the card legible at
+// a glance without piling on the same number we already show in the
+// forecast row above.
 
 type Period = '7d' | '30d' | '90d'
 
@@ -19,12 +18,59 @@ const PERIOD_LABEL: Record<Period, string> = {
 
 function microPerCommitDisplay(microPerCommit: string | null): string {
   if (microPerCommit === null) return '—'
-  // micro USD → dollars with 2 decimals (commits-per-day means cost
-  // is usually in the cents–dollars range; 4 decimals would be noisy).
   const cents = Number(BigInt(microPerCommit) / 10_000n) / 100
   if (Math.abs(cents) >= 100) return `$${cents.toFixed(1)}`
   return `$${cents.toFixed(2)}`
 }
+
+interface TileProps {
+  icon: JSX.Element
+  iconColor: string
+  label: string
+  value: string
+  sub?: string | undefined
+}
+
+function Tile({ icon, iconColor, label, value, sub }: TileProps): JSX.Element {
+  return (
+    <div className="yield-tile">
+      <div className="yield-tile-head">
+        <span className="yield-tile-icon" style={{ color: iconColor }}>{icon}</span>
+        <span className="yield-tile-label">{label}</span>
+      </div>
+      <div className="yield-tile-value">{value}</div>
+      {sub !== undefined && <div className="yield-tile-sub">{sub}</div>}
+    </div>
+  )
+}
+
+// Lucide-style line icons sized for the small tile head.
+const IconCoin = (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 7v10M9 9.5h4a1.5 1.5 0 1 1 0 3h-2a1.5 1.5 0 1 0 0 3h4" />
+  </svg>
+)
+const IconGitCommit = (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <circle cx="12" cy="12" r="3" />
+    <path d="M3 12h6M15 12h6" />
+  </svg>
+)
+const IconFolder = (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+  </svg>
+)
+const IconSpark = (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+  </svg>
+)
 
 export function YieldScoreCard({
   settings,
@@ -50,11 +96,8 @@ export function YieldScoreCard({
     <section className="yield-card">
       <header className="yield-card-head">
         <div className="yield-card-title">
-          <span className="yield-card-glyph" aria-hidden>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                 strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
-            </svg>
+          <span className="yield-card-glyph" aria-hidden style={{ color: 'rgba(255, 200, 100, 0.9)' }}>
+            {IconSpark}
           </span>
           <span className="yield-card-name">Yield Score</span>
           <span className="yield-card-tag">Estimated</span>
@@ -64,6 +107,7 @@ export function YieldScoreCard({
           value={period}
           onChange={(e) => setPeriod(e.currentTarget.value as Period)}
           aria-label="Period"
+          disabled={!enabled}
         >
           {(Object.keys(PERIOD_LABEL) as Period[]).map((p) => (
             <option key={p} value={p}>{PERIOD_LABEL[p]}</option>
@@ -80,60 +124,34 @@ export function YieldScoreCard({
         </div>
       )}
 
-      {enabled && snap === null && (
-        <div className="yield-card-empty">
-          <p>scanning your repos…</p>
+      {enabled && (
+        <div className="yield-tiles">
+          <Tile
+            icon={IconCoin}
+            iconColor="rgba(120, 200, 140, 0.95)"
+            label="Cost / commit"
+            value={microPerCommitDisplay(snap?.microPerCommit ?? null)}
+            sub={snap !== null && snap.totalCommits === 0 ? 'no commits yet' : undefined}
+          />
+          <Tile
+            icon={IconGitCommit}
+            iconColor="rgba(120, 170, 255, 0.95)"
+            label="Commits"
+            value={snap?.totalCommits.toString() ?? '—'}
+            sub={
+              snap !== null && snap.totalMerges > 0
+                ? `${snap.totalMerges} merge${snap.totalMerges === 1 ? '' : 's'}`
+                : undefined
+            }
+          />
+          <Tile
+            icon={IconFolder}
+            iconColor="rgba(255, 180, 120, 0.95)"
+            label="Repos"
+            value={snap?.repos.length.toString() ?? '—'}
+            sub={snap !== null ? 'active this window' : undefined}
+          />
         </div>
-      )}
-
-      {enabled && snap !== null && snap.totalCommits === 0 && (
-        <div className="yield-card-empty">
-          <p>No commits in the {PERIOD_LABEL[period].toLowerCase()} window.</p>
-          <p className="yield-card-sub">
-            Scanned {snap.repos.length} repo{snap.repos.length === 1 ? '' : 's'} under your home
-            directory in {snap.durationMs}ms.
-          </p>
-        </div>
-      )}
-
-      {enabled && snap !== null && snap.totalCommits > 0 && (
-        <>
-          {/* total-cost tile dropped — the same number is already in
-              MONTH-END FORECAST above (·"spent"). Keep the unique
-              ratio + commit count here. */}
-          <div className="yield-kpis yield-kpis-2">
-            <div className="yield-kpi yield-kpi-hero">
-              <span className="yield-kpi-label">cost / commit</span>
-              <span className="yield-kpi-value">{microPerCommitDisplay(snap.microPerCommit)}</span>
-            </div>
-            <div className="yield-kpi">
-              <span className="yield-kpi-label">commits</span>
-              <span className="yield-kpi-value">
-                {snap.totalCommits}
-                {snap.totalMerges > 0 && (
-                  <span className="yield-kpi-sub"> · {snap.totalMerges} merge{snap.totalMerges === 1 ? '' : 's'}</span>
-                )}
-              </span>
-            </div>
-          </div>
-
-          <details className="yield-breakdown">
-            <summary>
-              {snap.repos.length} active repo{snap.repos.length === 1 ? '' : 's'} this window
-            </summary>
-            <ul className="yield-repo-list">
-              {snap.repos.slice(0, 8).map((r) => (
-                <li key={r.path}>
-                  <span className="yield-repo-name" title={r.path}>{r.name}</span>
-                  <span className="yield-repo-count">{r.commits}</span>
-                </li>
-              ))}
-              {snap.repos.length > 8 && (
-                <li className="yield-repo-more">+ {snap.repos.length - 8} more</li>
-              )}
-            </ul>
-          </details>
-        </>
       )}
     </section>
   )
