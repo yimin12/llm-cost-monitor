@@ -61,9 +61,10 @@ export interface BundledOAuthConfig {
   clientSecret: string
 }
 
-// ⬇ Paste your Desktop OAuth client values here, then commit.
-// Leave as empty strings to keep the env-only behaviour we had before.
+// Desktop OAuth client (yimin12/llm-cost-monitor). Public per RFC 8252.
+// To bind to a different GCP project, set GCP_CLIENTID / GCP_CLIENTSECRET
+// in ~/.env — env override wins (see src/main/auth/env-loader.ts).
 export const BUNDLED_GOOGLE_OAUTH: BundledOAuthConfig = {
-  clientId: '',
-  clientSecret: '',
+  clientId: '474644305609-itbl41homk2q8abu1325agn2vhf3rpm4.apps.googleusercontent.com',
+  clientSecret: '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',
 }
