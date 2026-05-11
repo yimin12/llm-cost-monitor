@@ -8,7 +8,7 @@ import type { PricingTable } from '../pricing/pricing-table'
 import type { ProviderRegistry } from '../providers/registry'
 import type { SettingsStore } from '../settings/store'
 import type { EventRepository } from '../storage/event-repository'
-import { scanYield } from '../git/git-scanner'
+import { buildYieldSnapshot, type YieldPeriod } from '../git/yield-snapshot'
 import { fetchTeamOverview } from '../sync/team-overview-client'
 import type { AuthService } from '../auth/auth-service'
 
@@ -139,51 +139,13 @@ async function handle(
 
     case '/v1/yield-score': {
       const periodRaw = url.searchParams.get('period') ?? '30d'
-      const period: '7d' | '30d' | '90d' =
+      const period: YieldPeriod =
         periodRaw === '7d' || periodRaw === '90d' ? periodRaw : '30d'
-      const PERIOD_MS: Record<typeof period, number> = {
-        '7d': 7 * 24 * 3600_000,
-        '30d': 30 * 24 * 3600_000,
-        '90d': 90 * 24 * 3600_000,
-      }
-      const now = Date.now()
-      const windowStartMs = now - PERIOD_MS[period]
-      const enabled = deps.settings.get().privacy?.trackGitActivity === true
-      if (!enabled) {
-        sendJson(res, 200, {
-          period,
-          windowStartMs,
-          generatedAt: now,
-          durationMs: 0,
-          totalCommits: 0,
-          totalMerges: 0,
-          costMicroUsd: '0',
-          microPerCommit: null,
-          repos: [],
-          enabled: false,
-        })
-        return
-      }
-      const [scan, total] = await Promise.all([
-        scanYield(windowStartMs),
-        deps.aggregator.rangeTotal(windowStartMs, now),
-      ])
-      const microPerCommit =
-        scan.totalCommits > 0
-          ? (total.costMicroUsd / BigInt(scan.totalCommits)).toString()
-          : null
-      sendJson(res, 200, {
-        period,
-        windowStartMs,
-        generatedAt: scan.scannedAt,
-        durationMs: scan.durationMs,
-        totalCommits: scan.totalCommits,
-        totalMerges: scan.totalMerges,
-        costMicroUsd: total.costMicroUsd.toString(),
-        microPerCommit,
-        repos: scan.repos,
-        enabled: true,
-      })
+      sendJson(
+        res,
+        200,
+        await buildYieldSnapshot({ aggregator: deps.aggregator, settings: deps.settings }, period),
+      )
       return
     }
 
