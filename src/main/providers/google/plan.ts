@@ -44,27 +44,44 @@ const CODE_ASSIST_URL =
   'https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist'
 const CODE_ASSIST_TIMEOUT_MS = 4_000
 
-// Map a tier *id* to a label as a last-resort fallback when Google's
-// response omits `name`. Kept here so the chip never reads as a raw
-// `standard-tier` slug.
+// Condense Google's verbose tier name down to a single word the chip
+// can hold without wrapping. The Code Assist API hands us strings
+// like "Gemini Code Assist in Google One AI Pro" — fine for a banner,
+// way too long for a 80-px chip. We scan in priority order (most
+// specific first) and return the first keyword that matches.
+function shortenTierName(name: string): string {
+  const n = name.toLowerCase()
+  if (n.includes('ultra')) return 'Ultra'
+  if (n.includes('enterprise')) return 'Enterprise'
+  if (n.includes('pro')) return 'Pro'
+  if (n.includes('standard')) return 'Standard'
+  if (n.includes('legacy')) return 'Legacy'
+  if (n.includes('free')) return 'Free'
+  // Unknown / new tier — surface the original so we don't silently
+  // mis-label a future tier as "Pro".
+  return name
+}
+
+// Map a tier *id* to a short label as a last-resort fallback when
+// Google's response omits `name`.
 function tierIdLabel(id: string | undefined): string | null {
-  if (id === 'standard-tier') return 'Code Assist · Standard'
-  if (id === 'legacy-tier') return 'Code Assist · Legacy'
-  if (id === 'free-tier') return 'Code Assist · Free'
+  if (id === 'standard-tier') return 'Standard'
+  if (id === 'legacy-tier') return 'Legacy'
+  if (id === 'free-tier') return 'Free'
   return null
 }
 
 // Decide the plan label. Preference order:
-//   1. paidTier.name  — Pro/Ultra/Enterprise users; matches what
-//      the Gemini CLI's "Plan: …" banner prints verbatim.
+//   1. paidTier.name  — Pro/Ultra/Enterprise users, condensed to one
+//      word.
 //   2. currentTier.name — non-paid users with a server-provided name.
 //   3. tierIdLabel(paidTier.id ?? currentTier.id) — internal slugs.
 function planNameFromCodeAssist(r: LoadCodeAssistResponse): string | null {
   if (r.paidTier?.name !== undefined && r.paidTier.name.length > 0) {
-    return r.paidTier.name
+    return shortenTierName(r.paidTier.name)
   }
   if (r.currentTier?.name !== undefined && r.currentTier.name.length > 0) {
-    return r.currentTier.name
+    return shortenTierName(r.currentTier.name)
   }
   return tierIdLabel(r.paidTier?.id) ?? tierIdLabel(r.currentTier?.id)
 }
