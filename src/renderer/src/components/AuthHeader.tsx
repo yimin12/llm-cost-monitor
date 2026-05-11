@@ -24,12 +24,21 @@ function Avatar({ user }: { user: AuthUser }): JSX.Element {
   const hue = hueForEmail(user.email)
   const fallbackBg = `linear-gradient(135deg, hsl(${hue} 65% 55%), hsl(${(hue + 40) % 360} 65% 45%))`
 
+  // Tooltip-on-hover surfaces the email/name when the inline variant
+  // hides the .auth-identity column — without this, a user with two
+  // accounts can't tell who's signed in from the avatar alone.
+  const tooltip =
+    user.name !== null && user.name !== user.email
+      ? `${user.name} (${user.email})`
+      : user.email
+
   if (user.pictureUrl !== null && !imgFailed) {
     return (
       <img
         className="auth-avatar"
         src={user.pictureUrl}
         alt={user.name ?? user.email}
+        title={tooltip}
         // Google sometimes serves the image with referrer-blocked headers; if
         // the load fails we fall back to the colored letter so we never show
         // a broken-image icon.
@@ -45,7 +54,8 @@ function Avatar({ user }: { user: AuthUser }): JSX.Element {
     <span
       className="auth-avatar auth-avatar-fallback"
       style={{ background: fallbackBg }}
-      aria-label={user.name ?? user.email}
+      aria-label={tooltip}
+      title={tooltip}
     >
       {initial}
     </span>
@@ -84,7 +94,20 @@ export function AuthHeader({ className }: AuthHeaderProps): JSX.Element {
   if (state.kind === 'signed-in') {
     return (
       <div className={`auth-header signed-in ${className ?? ''}`}>
-        <Avatar user={state.user} />
+        {/* Avatar opens the user's Google Account page in their default
+            browser. shell.openExternal is the right call for arbitrary
+            https targets, but here we lean on the plain anchor — the
+            Electron BrowserWindow forwards target="_blank" links to the
+            OS browser via the existing main-process handler. */}
+        <a
+          className="auth-avatar-link"
+          href="https://myaccount.google.com/"
+          target="_blank"
+          rel="noreferrer"
+          aria-label="Open Google Account"
+        >
+          <Avatar user={state.user} />
+        </a>
         <div className="auth-identity">
           {state.user.name !== null && (
             <span className="auth-name" title={state.user.name}>

@@ -64,6 +64,12 @@ body {
  *      bounded to its own subtree instead of forcing a panel-wide
  *      relayout per scroll tick.
  */
+/* Outer panel: holds the background, the scroll area, and a pinned
+ * footer as siblings. No overflow here — `.dropdown-scroll` does the
+ * scrolling. This keeps the footer permanently anchored at the bottom
+ * of the visible panel regardless of scroll position (and side-steps
+ * the Lenis-vs-sticky incompatibility).
+ */
 .dropdown {
   position: relative;
   isolation: isolate;
@@ -75,13 +81,22 @@ body {
   color: rgb(var(--fg));
   display: flex;
   flex-direction: column;
-  gap: 10px;
   height: 100%;
-  padding: 12px 14px 10px;
   width: 100%;
+  font-size: 12px;
+  box-shadow:
+    0 16px 48px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.dropdown-scroll {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  font-size: 12px;
+  padding: 12px 14px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   /* Promote to its own compositor layer so scrolling doesn't repaint
      the menubar's host window. translateZ(0) is the canonical incantation;
      `will-change: scroll-position` tells Chromium specifically that
@@ -89,9 +104,6 @@ body {
      recalc on each frame. */
   transform: translateZ(0);
   will-change: scroll-position;
-  box-shadow:
-    0 16px 48px rgba(0, 0, 0, 0.55),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .aurora {
@@ -119,14 +131,14 @@ body {
   filter: blur(28px);
 }
 
-.dropdown::-webkit-scrollbar {
+.dropdown-scroll::-webkit-scrollbar {
   width: 6px;
 }
-.dropdown::-webkit-scrollbar-thumb {
+.dropdown-scroll::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.08);
   border-radius: 3px;
 }
-.dropdown::-webkit-scrollbar-track { background: transparent; }
+.dropdown-scroll::-webkit-scrollbar-track { background: transparent; }
 
 .dropdown.loading {
   align-items: center;
@@ -821,39 +833,224 @@ body {
   opacity: 0.55;
   cursor: progress;
 }
+/* ── Inline variant: renders the AuthHeader inside .dropdown-header
+ *    next to the brand. Strips the card chrome so it visually merges
+ *    with the title row, and *hides* the name + email entirely —
+ *    only the avatar + Sign-out button render. The avatar's title
+ *    attribute (set in AuthHeader.tsx) surfaces email/name on hover.
+ *    Keeps the row genuinely uncluttered at the 390px panel width.
+ */
+.auth-header.auth-header-inline {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  border-radius: 0;
+  min-height: 0;
+  gap: 6px;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+.auth-header.auth-header-inline.signed-in {
+  background: transparent;
+  border: 0;
+}
+.auth-header.auth-header-inline .auth-avatar {
+  width: 22px;
+  height: 22px;
+  border-width: 1px;
+}
+.auth-avatar-link {
+  display: inline-flex;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+  text-decoration: none;
+}
+.auth-avatar-link:hover {
+  transform: scale(1.06);
+  box-shadow: 0 0 0 2px rgba(99, 173, 255, 0.35);
+}
+.auth-avatar-link:focus-visible {
+  outline: 2px solid rgba(99, 173, 255, 0.6);
+  outline-offset: 2px;
+}
+.auth-header.auth-header-inline .auth-avatar-fallback {
+  font-size: 11px;
+}
+.auth-header.auth-header-inline .auth-identity {
+  display: none;
+}
+.auth-header.auth-header-inline .auth-btn {
+  font-size: 10.5px;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+
 .auth-btn-primary {
-  background: #ffffff;
-  color: #1f1f1f;
-  border-color: rgba(0, 0, 0, 0.1);
-  font-weight: 650;
+  /* Match the panel/footer dark shade so the button blends with the
+     surrounding chrome — only the colored Google "G" stays as the
+     brand accent. Previous white pill was visually loud against the
+     dark menubar UI. */
+  background: rgba(18, 20, 26, 0.96);
+  color: rgba(var(--fg), 0.95);
+  border-color: rgba(255, 255, 255, 0.12);
+  font-weight: 600;
   padding: 6px 14px;
 }
 .auth-btn-primary:hover:not(:disabled) {
-  background: #f1f3f4;
-  border-color: rgba(0, 0, 0, 0.15);
+  background: rgba(28, 30, 38, 0.98);
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
-.privacy {
+/* (.privacy rules deleted — replaced by .privacy-badge in the footer
+ * meta row. The PrivacyBanner component itself is unmounted but kept
+ * in src/renderer/src/components/PrivacyBanner.tsx for now in case
+ * we ever want a verbose surface back.) */
+
+/* ─── Yield Score card (Overview tab) ─── */
+.yield-card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  padding: 12px 14px;
   display: flex;
-  gap: 8px;
-  align-items: flex-start;
-  font-size: 10px;
-  color: rgba(var(--fg), 0.5);
-  line-height: 1.45;
-  background: linear-gradient(180deg, rgba(48, 209, 88, 0.06), rgba(48, 209, 88, 0.02));
-  border: 1px solid rgba(48, 209, 88, 0.14);
-  border-radius: 10px;
-  padding: 8px 10px;
   flex-direction: column;
+  gap: 10px;
 }
-.privacy-line {
+.yield-card-head {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  align-items: flex-start;
 }
-.privacy-line.subtle {
-  color: rgba(var(--fg), 0.4);
+.yield-card-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 650;
+  color: rgba(var(--fg), 0.95);
+}
+.yield-card-glyph {
+  display: inline-flex;
+  color: rgba(255, 200, 100, 0.85);
+}
+.yield-card-tag {
   font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  color: rgba(var(--fg), 0.45);
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.yield-period {
+  background: rgba(0, 0, 0, 0.25);
+  color: rgba(var(--fg), 0.9);
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  padding: 3px 7px;
+  font-size: 10.5px;
+  font-family: inherit;
+}
+.yield-card-empty {
+  font-size: 11.5px;
+  color: rgba(var(--fg), 0.78);
+  line-height: 1.5;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.yield-card-empty p { margin: 0; }
+.yield-card-empty .yield-card-sub {
+  font-size: 10.5px;
+  color: rgba(var(--fg), 0.5);
+}
+.yield-card-empty strong { color: rgba(var(--fg), 0.95); font-weight: 600; }
+
+/* CLI-Pulse-style sparse KPI tile primitive — shared by Yield Score,
+   TODAY hero, and any future panel that wants the same look. Three
+   visual rows (icon+label / value / optional sub), each row stays
+   single-line so tiles in the same grid always line up. */
+.kpi-grid {
+  display: grid;
+  gap: 8px;
+}
+.kpi-grid-3 { grid-template-columns: repeat(3, 1fr); }
+.kpi-grid-4 { grid-template-columns: repeat(4, 1fr); }
+
+.kpi-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 6px;
+  padding: 10px 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 9px;
+  min-width: 0;
+}
+.kpi-tile-head {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+.kpi-tile-icon { display: inline-flex; flex-shrink: 0; }
+.kpi-tile-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(var(--fg), 0.65);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.kpi-tile-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: rgba(var(--fg), 0.98);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.kpi-tile-sub {
+  font-size: 10px;
+  color: rgba(var(--fg), 0.45);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  min-height: 14px; /* reserve space so tiles without a sub stay
+                       aligned with tiles that do */
+}
+
+/* ─── Settings row (label + help text + switch) ─── */
+.settings-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  cursor: pointer;
+}
+.settings-row-text { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+.settings-row-label { font-size: 12px; font-weight: 600; color: rgba(var(--fg), 0.92); }
+.settings-row-help { font-size: 10.5px; color: rgba(var(--fg), 0.55); line-height: 1.5; }
+.settings-switch {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+  accent-color: rgba(120, 200, 140, 0.9);
 }
 .privacy-line code {
   background: rgba(255, 255, 255, 0.06);
@@ -1713,4 +1910,195 @@ body {
 }
 .team-row-action-danger:hover:not(:disabled) {
   background: rgba(220, 90, 90, 0.18);
+}
+
+/* ───── Tray footer (version + refresh + language + quit) ─────
+ * Sibling of .dropdown-scroll inside .dropdown — the outer panel is
+ * a flex column where the scroll area takes the middle (flex: 1) and
+ * the footer takes its natural height at the bottom. This means the
+ * footer is *outside* the scroll area entirely, so scrolling the
+ * content has zero effect on the footer's position.
+ */
+.tray-footer {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 12px;
+  font-size: 10.5px;
+  color: rgba(var(--fg), 0.7);
+  /* Fixed dark shade — same value used by .lang-popover below — so
+     the popover (which sits *over* the dashboard content, not over
+     this band) ends up the same visual colour. Composing the two
+     against different backdrops was making the popover look darker
+     than the footer. */
+  background: rgba(18, 20, 26, 0.96);
+  /* Round only the bottom corners so the footer's bottom edge follows
+     the panel's rounded border. */
+  border-radius: 0 0 16px 16px;
+}
+.tray-footer-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.tray-footer-version {
+  font-family: 'SF Mono', ui-monospace, Menlo, Monaco, monospace;
+  letter-spacing: 0.02em;
+  color: rgba(var(--fg), 0.62);
+}
+.privacy-badge-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.privacy-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  color: rgba(var(--fg), 0.5);
+  cursor: pointer;
+  transition: color 120ms ease;
+  font: inherit;
+}
+.privacy-badge:hover { color: rgba(var(--fg), 0.92); }
+.privacy-badge[aria-expanded='true'] { color: rgba(var(--fg), 1); }
+.privacy-popover {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  width: 280px;
+  /* Same fixed dark shade used by the language popover so all the
+     footer pop-ups read as the same surface family. */
+  background: rgba(18, 20, 26, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgba(var(--fg), 0.85);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+  z-index: 20;
+}
+.privacy-popover-line { margin: 0; }
+.privacy-popover-line + .privacy-popover-line { margin-top: 6px; }
+.privacy-popover-line.subtle {
+  color: rgba(var(--fg), 0.6);
+  font-size: 10.5px;
+}
+.privacy-popover-line strong { color: rgba(var(--fg), 1); font-weight: 650; }
+.privacy-popover-line code {
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: 'SF Mono', ui-monospace, Menlo, Monaco, monospace;
+  font-size: 10px;
+}
+.tray-footer-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.footer-icon-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  /* Footer icons sit on a fairly dark band (rgba 0,0,0,0.35 over the
+     panel base). Push the resting opacity high enough that the icons
+     read as "active controls" rather than "decorative chrome", but
+     keep them just shy of #fff so hover/focus still has somewhere to
+     go visually. */
+  color: rgba(var(--fg), 0.95);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+.footer-icon-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.18);
+}
+.footer-icon-btn:active:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  transform: scale(0.96);
+}
+.footer-icon-btn:disabled { opacity: 0.45; cursor: progress; }
+.footer-icon-glyph {
+  display: inline-block;
+  font-size: 12px;
+  line-height: 1;
+  font-weight: 600;
+}
+.footer-icon-glyph.spin {
+  animation: footer-spin 0.9s linear infinite;
+}
+@keyframes footer-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Language picker popover ── */
+.lang-picker {
+  position: relative;
+  display: inline-block;
+}
+.lang-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  min-width: 180px;
+  /* Same fixed shade as .tray-footer above so the two always read as
+     one continuous dark surface, regardless of what content the
+     popover happens to be floating over. */
+  background: rgba(18, 20, 26, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+  z-index: 20;
+}
+.lang-option {
+  background: transparent;
+  border: 0;
+  color: rgba(var(--fg), 0.95);
+  font-size: 12.5px;
+  text-align: left;
+  padding: 7px 10px 7px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  align-items: center;
+  gap: 6px;
+  font-family: inherit;
+  transition: background 100ms ease;
+}
+.lang-option:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.lang-option[aria-checked='true'] {
+  color: rgba(var(--fg), 1);
+  font-weight: 550;
+}
+.lang-check {
+  font-size: 11.5px;
+  color: rgba(var(--fg), 1);
+  text-align: center;
+}
+.lang-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.10);
+  margin: 4px 4px;
 }

@@ -293,5 +293,17 @@ export function installBrowserStub(): void {
     teamRevokeMember: async () => ({ ok: false, status: 0, error: 'browser_stub' }),
     teamSetMemberRole: async () => ({ ok: false, status: 0, error: 'browser_stub' }),
     teamSetPrivacyFloor: async () => ({ ok: false, status: 0, error: 'browser_stub' }),
+    yieldScore: async (period: '7d' | '30d' | '90d') => ({
+      period,
+      windowStartMs: 0,
+      generatedAt: Date.now(),
+      durationMs: 0,
+      totalCommits: 0,
+      totalMerges: 0,
+      costMicroUsd: '0',
+      microPerCommit: null,
+      repos: [],
+      enabled: false,
+    }),
   }
 }

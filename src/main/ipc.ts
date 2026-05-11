@@ -15,8 +15,11 @@ import {
   type TeamManageResult,
   type TeamMemberRole,
   type TeamOverview,
+  type YieldScoreSnapshot,
 } from '@shared/ipc-channels'
 import type { PrivacyLevel, TeamSyncSettings } from '@shared/sync'
+
+import { scanYield } from './git/git-scanner'
 
 import type { Aggregator } from './aggregation/aggregator'
 import type { AlertRepository } from './alerts/alert-repository'
@@ -183,6 +186,57 @@ export function registerIpcHandlers(deps: IpcDeps): void {
       const ctx = await requireTeam()
       if (!ctx.ok) return ctx.result
       return deps.teamSetPrivacyFloor(ctx.teamId, ctx.token, level)
+    },
+  )
+
+  // Yield Score: combines git scanner output with usage cost in the
+  // same window. Returns an "enabled: false" empty snapshot when the
+  // user hasn't opted in via Settings → Privacy → Track git activity.
+  const PERIOD_MS: Record<'7d' | '30d' | '90d', number> = {
+    '7d': 7 * 24 * 3600_000,
+    '30d': 30 * 24 * 3600_000,
+    '90d': 90 * 24 * 3600_000,
+  }
+  ipcMain.handle(
+    IPC.YIELD_SCORE,
+    async (_e, period: '7d' | '30d' | '90d' = '30d'): Promise<YieldScoreSnapshot> => {
+      const now = Date.now()
+      const windowStartMs = now - PERIOD_MS[period]
+      const enabled = deps.settings.get().privacy?.trackGitActivity === true
+      if (!enabled) {
+        return {
+          period,
+          windowStartMs,
+          generatedAt: now,
+          durationMs: 0,
+          totalCommits: 0,
+          totalMerges: 0,
+          costMicroUsd: '0',
+          microPerCommit: null,
+          repos: [],
+          enabled: false,
+        }
+      }
+      const [scan, total] = await Promise.all([
+        scanYield(windowStartMs),
+        deps.aggregator.rangeTotal(windowStartMs, now),
+      ])
+      const microPerCommit =
+        scan.totalCommits > 0
+          ? (total.costMicroUsd / BigInt(scan.totalCommits)).toString()
+          : null
+      return {
+        period,
+        windowStartMs,
+        generatedAt: scan.scannedAt,
+        durationMs: scan.durationMs,
+        totalCommits: scan.totalCommits,
+        totalMerges: scan.totalMerges,
+        costMicroUsd: total.costMicroUsd.toString(),
+        microPerCommit,
+        repos: scan.repos,
+        enabled: true,
+      }
     },
   )
 

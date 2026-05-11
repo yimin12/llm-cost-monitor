@@ -12,6 +12,20 @@ function fakeJwt(claims: Record<string, unknown>): string {
   return `${b64({ alg: 'none', typ: 'JWT' })}.${b64(claims)}.`
 }
 
+// Default fetch stub: returns 404 so the Code Assist call falls back
+// to the OIDC-only display. Tests that exercise the Pro / tier path
+// pass their own mock instead.
+const fetchNotFound: typeof fetch = async () =>
+  new Response('', { status: 404 }) as unknown as Response
+
+function mockFetchJson(body: unknown): typeof fetch {
+  return (async () =>
+    new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }) as unknown as Response) as typeof fetch
+}
+
 describe('detectGooglePlan', () => {
   let dir: string
 
@@ -24,7 +38,7 @@ describe('detectGooglePlan', () => {
   })
 
   it('returns "none" when no creds and no env key', async () => {
-    const plan = await detectGooglePlan({ geminiHome: dir, env: {} })
+    const plan = await detectGooglePlan({ geminiHome: dir, env: {}, fetchImpl: fetchNotFound })
     expect(plan.authMode).toBe('none')
   })
 
@@ -34,7 +48,7 @@ describe('detectGooglePlan', () => {
       join(dir, 'oauth_creds.json'),
       JSON.stringify({ access_token: 'a', id_token: idToken, refresh_token: 'r' }),
     )
-    const plan = await detectGooglePlan({ geminiHome: dir, env: {} })
+    const plan = await detectGooglePlan({ geminiHome: dir, env: {}, fetchImpl: fetchNotFound })
     // OAuth — Gemini CLI's free tier login, NOT a paid subscription.
     expect(plan.authMode).toBe('oauth')
     expect(plan.planName).toBe('Google Account')
@@ -47,7 +61,7 @@ describe('detectGooglePlan', () => {
       join(dir, 'oauth_creds.json'),
       JSON.stringify({ id_token: idToken }),
     )
-    const plan = await detectGooglePlan({ geminiHome: dir, env: {} })
+    const plan = await detectGooglePlan({ geminiHome: dir, env: {}, fetchImpl: fetchNotFound })
     expect(plan.planName).toBe('Workspace Account')
   })
 
@@ -57,7 +71,7 @@ describe('detectGooglePlan', () => {
       join(dir, 'google_accounts.json'),
       JSON.stringify({ active: 'fallback@example.com' }),
     )
-    const plan = await detectGooglePlan({ geminiHome: dir, env: {} })
+    const plan = await detectGooglePlan({ geminiHome: dir, env: {}, fetchImpl: fetchNotFound })
     expect(plan.authMode).toBe('oauth')
     expect(plan.detail).toBe('fallback@example.com')
   })
@@ -82,7 +96,102 @@ describe('detectGooglePlan', () => {
 
   it('returns "unknown" when oauth_creds.json exists but lacks id_token', async () => {
     await writeFile(join(dir, 'oauth_creds.json'), JSON.stringify({ access_token: 'a' }))
-    const plan = await detectGooglePlan({ geminiHome: dir, env: {} })
+    const plan = await detectGooglePlan({ geminiHome: dir, env: {}, fetchImpl: fetchNotFound })
     expect(plan.authMode).toBe('unknown')
+  })
+
+  it('uses paidTier.name verbatim when Google provides one', async () => {
+    const idToken = fakeJwt({ email: 'g@example.com' })
+    await writeFile(
+      join(dir, 'oauth_creds.json'),
+      JSON.stringify({
+        access_token: 'a',
+        id_token: idToken,
+        expiry_date: Date.now() + 60_000,
+      }),
+    )
+    const plan = await detectGooglePlan({
+      geminiHome: dir,
+      env: {},
+      fetchImpl: mockFetchJson({
+        currentTier: { id: 'standard-tier', name: 'Gemini Code Assist Standard' },
+        paidTier: { id: 'standard-tier', name: 'Gemini Code Assist in Google One AI Pro' },
+      }),
+    })
+    expect(plan.authMode).toBe('subscription')
+    // Google sends "Gemini Code Assist in Google One AI Pro";
+    // condensed to one word for the chip.
+    expect(plan.planName).toBe('Pro')
+    expect(plan.detail).toBe('g@example.com')
+  })
+
+  it('condenses "…Ultra" to Ultra', async () => {
+    const idToken = fakeJwt({ email: 'g@example.com' })
+    await writeFile(
+      join(dir, 'oauth_creds.json'),
+      JSON.stringify({ access_token: 'a', id_token: idToken, expiry_date: Date.now() + 60_000 }),
+    )
+    const plan = await detectGooglePlan({
+      geminiHome: dir,
+      env: {},
+      fetchImpl: mockFetchJson({
+        paidTier: { name: 'Gemini Code Assist in Google One AI Ultra' },
+      }),
+    })
+    expect(plan.planName).toBe('Ultra')
+  })
+
+  it('prefers currentTier.name and condenses it', async () => {
+    const idToken = fakeJwt({ email: 'g@example.com' })
+    await writeFile(
+      join(dir, 'oauth_creds.json'),
+      JSON.stringify({ access_token: 'a', id_token: idToken, expiry_date: Date.now() + 60_000 }),
+    )
+    const plan = await detectGooglePlan({
+      geminiHome: dir,
+      env: {},
+      fetchImpl: mockFetchJson({
+        currentTier: { id: 'free-tier', name: 'Gemini Code Assist Free' },
+      }),
+    })
+    expect(plan.authMode).toBe('subscription')
+    expect(plan.planName).toBe('Free')
+  })
+
+  it('falls back to a tier-id label when Google omits name', async () => {
+    const idToken = fakeJwt({ email: 'g@example.com' })
+    await writeFile(
+      join(dir, 'oauth_creds.json'),
+      JSON.stringify({ access_token: 'a', id_token: idToken, expiry_date: Date.now() + 60_000 }),
+    )
+    const plan = await detectGooglePlan({
+      geminiHome: dir,
+      env: {},
+      fetchImpl: mockFetchJson({ currentTier: { id: 'standard-tier' } }),
+    })
+    expect(plan.planName).toBe('Standard')
+  })
+
+  it('falls back to Google Account when the access token is expired (no Code Assist call attempted)', async () => {
+    const idToken = fakeJwt({ email: 'g@example.com' })
+    await writeFile(
+      join(dir, 'oauth_creds.json'),
+      JSON.stringify({ access_token: 'a', id_token: idToken, expiry_date: Date.now() - 60_000 }),
+    )
+    let called = false
+    const plan = await detectGooglePlan({
+      geminiHome: dir,
+      env: {},
+      fetchImpl: ((): typeof fetch => {
+        const f: typeof fetch = async () => {
+          called = true
+          return new Response('', { status: 200 }) as unknown as Response
+        }
+        return f
+      })(),
+    })
+    expect(called).toBe(false)
+    expect(plan.authMode).toBe('oauth')
+    expect(plan.planName).toBe('Google Account')
   })
 })

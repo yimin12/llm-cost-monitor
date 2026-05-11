@@ -70,6 +70,7 @@ export class SettingsStore {
         ...this.cached.providerCredentials,
         ...(patch.providerCredentials ?? {}),
       },
+      privacy: { ...this.cached.privacy, ...(patch.privacy ?? {}) },
       schemaVersion: SETTINGS_SCHEMA_VERSION,
     }
     this.persist(next)
@@ -139,6 +140,10 @@ function migrate(parsed: Partial<AppSettings>): AppSettings {
     teamSync: { ...DEFAULT_TEAM_SYNC, ...(parsed.teamSync ?? {}) },
     planOverrides: { ...(parsed.planOverrides ?? {}) },
     providerCredentials: { ...(parsed.providerCredentials ?? {}) },
+    locale: parsed.locale ?? 'auto',
+    privacy: {
+      trackGitActivity: parsed.privacy?.trackGitActivity ?? false,
+    },
     schemaVersion: SETTINGS_SCHEMA_VERSION,
   }
   return base
