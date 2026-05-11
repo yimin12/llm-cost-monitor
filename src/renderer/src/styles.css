@@ -964,8 +964,11 @@ body {
 .yield-tile {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 10px 12px;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 6px;
+  padding: 12px 10px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 9px;
@@ -974,6 +977,7 @@ body {
 .yield-tile-head {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 5px;
 }
 .yield-tile-icon { display: inline-flex; flex-shrink: 0; }
@@ -989,10 +993,12 @@ body {
   color: rgba(var(--fg), 0.98);
   font-variant-numeric: tabular-nums;
   line-height: 1.15;
+  text-align: center;
 }
 .yield-tile-sub {
   font-size: 10px;
   color: rgba(var(--fg), 0.45);
+  text-align: center;
 }
 
 /* ─── Settings row (label + help text + switch) ─── */
