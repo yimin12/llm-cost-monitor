@@ -67,29 +67,34 @@ const fakeSnapshot: AggregateSnapshot = {
   byProviderToday: [
     { provider: 'anthropic', costMicroUsd: usd(2.4), eventCount: 8 },
     { provider: 'openai', costMicroUsd: usd(1.2), eventCount: 3 },
+    { provider: 'cursor', costMicroUsd: usd(0.92), eventCount: 4 },
     { provider: 'google', costMicroUsd: usd(0.67), eventCount: 1 },
   ],
   byProvider30d: [
     { provider: 'anthropic', costMicroUsd: usd(72.4), eventCount: 198 },
     { provider: 'openai', costMicroUsd: usd(28.7), eventCount: 84 },
+    { provider: 'cursor', costMicroUsd: usd(19.2), eventCount: 56 },
     { provider: 'google', costMicroUsd: usd(8.4), eventCount: 22 },
     { provider: 'deepseek', costMicroUsd: usd(3.1), eventCount: 8 },
   ],
   byProvider6m: [
     { provider: 'anthropic', costMicroUsd: usd(394.2), eventCount: 1_086 },
     { provider: 'openai', costMicroUsd: usd(155.6), eventCount: 462 },
+    { provider: 'cursor', costMicroUsd: usd(104.1), eventCount: 312 },
     { provider: 'google', costMicroUsd: usd(45.2), eventCount: 121 },
     { provider: 'deepseek', costMicroUsd: usd(17.4), eventCount: 41 },
   ],
   byProvider1y: [
     { provider: 'anthropic', costMicroUsd: usd(762.6), eventCount: 2_098 },
     { provider: 'openai', costMicroUsd: usd(301.8), eventCount: 893 },
+    { provider: 'cursor', costMicroUsd: usd(201.7), eventCount: 608 },
     { provider: 'google', costMicroUsd: usd(87.5), eventCount: 234 },
     { provider: 'deepseek', costMicroUsd: usd(32.8), eventCount: 87 },
   ],
   topModelsToday: [
     { provider: 'anthropic', model: 'claude-opus-4-7', costMicroUsd: usd(2.1), eventCount: 6 },
     { provider: 'openai', model: 'gpt-5-codex', costMicroUsd: usd(1.2), eventCount: 3 },
+    { provider: 'cursor', model: 'claude-3-5-sonnet (via cursor)', costMicroUsd: usd(0.92), eventCount: 4 },
     { provider: 'anthropic', model: 'claude-sonnet-4-6', costMicroUsd: usd(0.3), eventCount: 2 },
     { provider: 'google', model: 'gemini-2.5-pro', costMicroUsd: usd(0.67), eventCount: 1 },
   ],
@@ -122,6 +127,11 @@ const fakeSnapshot: AggregateSnapshot = {
       daysElapsed: 7, daysInMonth: 31,
       spentMicroUsd: usd(2.34), estimateMicroUsd: usd(10.36), confidenceBandMicroUsd: usd(1.1),
     },
+    cursor: {
+      monthStartMs: Date.now() - 7 * 24 * 3600_000,
+      daysElapsed: 7, daysInMonth: 31,
+      spentMicroUsd: usd(5.7), estimateMicroUsd: usd(25.2), confidenceBandMicroUsd: usd(2.4),
+    },
   },
   // 365 oldest-first entries — renderer slices the last N based on the
   // selected period. Deterministic pseudo-random walk so the fake demo
@@ -140,11 +150,13 @@ const fakeSnapshot: AggregateSnapshot = {
   providerLastSeen: {
     anthropic: Date.now() - 2 * 60_000,
     openai: Date.now() - 14 * 60_000,
+    cursor: Date.now() - 8 * 60_000,
     google: Date.now() - 3 * 3600_000,
   },
   recentSessions: [
     { sessionId: 'a1b2c3d4-e5f6-7890-abcd-1234567890ab', provider: 'anthropic', project: 'llm-cost-monitor', costMicroUsd: usd(1.42), eventCount: 6, firstAt: Date.now() - 25 * 60_000, lastAt: Date.now() - 2 * 60_000 },
     { sessionId: '0xfeedface-0000-1111-2222-deadbeefcafe', provider: 'openai', project: '~/work/api', costMicroUsd: usd(0.94), eventCount: 3, firstAt: Date.now() - 2 * 3600_000, lastAt: Date.now() - 14 * 60_000 },
+    { sessionId: 'cur-3a91bb', provider: 'cursor', project: 'llm-cost-monitor', costMicroUsd: usd(0.62), eventCount: 4, firstAt: Date.now() - 35 * 60_000, lastAt: Date.now() - 8 * 60_000 },
     { sessionId: 'gem-72b9af', provider: 'google', project: '(none)', costMicroUsd: usd(0.27), eventCount: 1, firstAt: Date.now() - 4 * 3600_000, lastAt: Date.now() - 3 * 3600_000 },
     { sessionId: 'a91xx-claude-replay', provider: 'anthropic', project: 'docs/build-log', costMicroUsd: usd(0.18), eventCount: 2, firstAt: Date.now() - 25 * 3600_000, lastAt: Date.now() - 22 * 3600_000 },
   ],
@@ -157,6 +169,8 @@ const fakeProviders: ProviderListEntry[] = [
     plan: { authMode: 'subscription', planName: 'Plus', source: '~/.codex/auth.json', detail: 'demo@example.com' } },
   { id: 'google', name: 'Gemini CLI', isEnabled: true, isAvailable: true, cliCommand: 'gemini', dashboardUrl: null,
     plan: { authMode: 'oauth', planName: 'Google Account', source: '~/.gemini/oauth_creds.json', detail: 'demo@example.com' } },
+  { id: 'cursor', name: 'Cursor', isEnabled: true, isAvailable: true, cliCommand: 'cursor-agent', dashboardUrl: 'https://cursor.com/dashboard',
+    plan: { authMode: 'subscription', planName: 'Pro', source: '~/.cursor/auth.json', detail: 'demo@example.com' } },
   { id: 'deepseek', name: 'DeepSeek', isEnabled: false, isAvailable: false, cliCommand: null, dashboardUrl: null,
     plan: { authMode: 'apiKey', planName: 'API key', source: 'DEEPSEEK_API_KEY env', detail: null } },
   { id: 'moonshotai', name: 'Kimi', isEnabled: false, isAvailable: false, cliCommand: null, dashboardUrl: null,
