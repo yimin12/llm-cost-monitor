@@ -230,8 +230,35 @@ export class TeamService {
     const batchNow = BigInt(Date.now())
     const touchedNodes = new Set<string>()
 
+    // Roll up only the events that *actually got inserted* (skip dups +
+    // conflicts so retries don't double-count). Keyed by the full PK of
+    // event_daily_rollup. 500 same-day same-model events from one node
+    // collapse into a single UPSERT below.
+    interface RollupBucket {
+      user_id: string
+      node_id: string
+      date: string
+      provider: string
+      model: string
+      project_hash: string
+      event_count: number
+      input_tokens: bigint
+      output_tokens: bigint
+      cache_read_tokens: bigint
+      cache_creation_5m_tokens: bigint
+      cache_creation_1h_tokens: bigint
+      reasoning_tokens: bigint
+      cost_micro_usd: bigint
+      pricing_snapshot_version: string
+    }
+    const rollupDeltas = new Map<string, RollupBucket>()
+
     const idOf = (p: SyncPayload): string =>
       p.kind === 'event' ? p.sync_event_id : `${p.date}|${p.provider}|${p.model}`
+
+    // UTC day bucket — matches src/main/sync/redaction.ts so event-level
+    // rollup days line up with aggregateOnly client days.
+    const dayBucketUtc = (ts: number): string => new Date(ts).toISOString().slice(0, 10)
 
     const client = await this.pool.connect()
     try {
@@ -286,9 +313,48 @@ export class TeamService {
 
         if (p.kind === 'event') {
           const acceptedFlag = await this.upsertEvent(client, p)
-          if (acceptedFlag === 'inserted') accepted.push(p.sync_event_id)
-          else if (acceptedFlag === 'duplicate') duplicates.push(p.sync_event_id)
-          else if (acceptedFlag === 'conflict') {
+          if (acceptedFlag === 'inserted') {
+            accepted.push(p.sync_event_id)
+            // Bucket the delta for a single grouped UPSERT later. Only
+            // 'inserted' rows count — 'duplicate' / 'conflict' must not
+            // touch the rollup or retries would over-count.
+            const date = dayBucketUtc(p.timestamp)
+            const projectHash = p.project_hash ?? ''
+            const key = `${p.user_id}|${p.node_id}|${date}|${p.provider}|${p.model}|${projectHash}`
+            const cur = rollupDeltas.get(key)
+            if (cur === undefined) {
+              rollupDeltas.set(key, {
+                user_id: p.user_id,
+                node_id: p.node_id,
+                date,
+                provider: p.provider,
+                model: p.model,
+                project_hash: projectHash,
+                event_count: 1,
+                input_tokens: BigInt(p.input_tokens),
+                output_tokens: BigInt(p.output_tokens),
+                cache_read_tokens: BigInt(p.cache_read_tokens),
+                cache_creation_5m_tokens: BigInt(p.cache_creation_5m_tokens),
+                cache_creation_1h_tokens: BigInt(p.cache_creation_1h_tokens),
+                reasoning_tokens: BigInt(p.reasoning_tokens ?? 0),
+                cost_micro_usd: BigInt(p.cost_micro_usd),
+                pricing_snapshot_version: p.pricing_snapshot_version,
+              })
+            } else {
+              cur.event_count += 1
+              cur.input_tokens += BigInt(p.input_tokens)
+              cur.output_tokens += BigInt(p.output_tokens)
+              cur.cache_read_tokens += BigInt(p.cache_read_tokens)
+              cur.cache_creation_5m_tokens += BigInt(p.cache_creation_5m_tokens)
+              cur.cache_creation_1h_tokens += BigInt(p.cache_creation_1h_tokens)
+              cur.reasoning_tokens += BigInt(p.reasoning_tokens ?? 0)
+              cur.cost_micro_usd += BigInt(p.cost_micro_usd)
+              // Last writer wins for the snapshot label.
+              cur.pricing_snapshot_version = p.pricing_snapshot_version
+            }
+          } else if (acceptedFlag === 'duplicate') {
+            duplicates.push(p.sync_event_id)
+          } else if (acceptedFlag === 'conflict') {
             duplicates.push(p.sync_event_id)
           }
           if (p.timestamp > maxTimestamp) maxTimestamp = p.timestamp
@@ -305,6 +371,41 @@ export class TeamService {
           )
           if (endOfDay > maxTimestamp) maxTimestamp = endOfDay
         }
+      }
+
+      // Emit one accumulating UPSERT per (user, node, date, provider,
+      // model, project_hash) group. Same transaction as the raw inserts
+      // → either both sides land or both roll back. Idempotent: a row
+      // that hit ON CONFLICT in usage_events was excluded above, so we
+      // never accumulate the same delta twice.
+      for (const d of rollupDeltas.values()) {
+        await client.query(
+          `INSERT INTO event_daily_rollup (
+             team_id, user_id, node_id, date, provider, model, project_hash,
+             event_count, input_tokens, output_tokens,
+             cache_read_tokens, cache_creation_5m_tokens, cache_creation_1h_tokens,
+             reasoning_tokens, cost_micro_usd, pricing_snapshot_version, uploaded_at
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+           ON CONFLICT (team_id, user_id, node_id, date, provider, model, project_hash)
+           DO UPDATE SET
+             event_count              = event_daily_rollup.event_count              + EXCLUDED.event_count,
+             input_tokens             = event_daily_rollup.input_tokens             + EXCLUDED.input_tokens,
+             output_tokens            = event_daily_rollup.output_tokens            + EXCLUDED.output_tokens,
+             cache_read_tokens        = event_daily_rollup.cache_read_tokens        + EXCLUDED.cache_read_tokens,
+             cache_creation_5m_tokens = event_daily_rollup.cache_creation_5m_tokens + EXCLUDED.cache_creation_5m_tokens,
+             cache_creation_1h_tokens = event_daily_rollup.cache_creation_1h_tokens + EXCLUDED.cache_creation_1h_tokens,
+             reasoning_tokens         = event_daily_rollup.reasoning_tokens         + EXCLUDED.reasoning_tokens,
+             cost_micro_usd           = event_daily_rollup.cost_micro_usd           + EXCLUDED.cost_micro_usd,
+             pricing_snapshot_version = EXCLUDED.pricing_snapshot_version,
+             uploaded_at              = EXCLUDED.uploaded_at`,
+          [
+            teamId, d.user_id, d.node_id, d.date, d.provider, d.model, d.project_hash,
+            BigInt(d.event_count), d.input_tokens, d.output_tokens,
+            d.cache_read_tokens, d.cache_creation_5m_tokens, d.cache_creation_1h_tokens,
+            d.reasoning_tokens, d.cost_micro_usd,
+            d.pricing_snapshot_version, batchNow,
+          ],
+        )
       }
 
       await client.query('COMMIT')
@@ -414,6 +515,14 @@ export class TeamService {
   // Build the rollup payload for a team. Window defaults to last 30d.
   // requestingUserId is used to surface that user's own role on the
   // overview so the renderer can gate the management UI.
+  //
+  // Reads go through `v_merged_daily` — the UNION of daily_aggregates
+  // (privacy=aggregateOnly clients) and event_daily_rollup (server-
+  // maintained rollup of event-level uploads). This keeps the dashboard
+  // off the raw events table for 30-day windows, per design.md
+  // §"Rollup Path". Today's KPI still uses raw events (sub-day
+  // granularity is the whole point of that card) but the window is short
+  // and supported by usage_events_team_ts_idx.
   async getOverview(
     teamId: string,
     opts: { requestingUserId?: string; windowMs?: number } = {},
@@ -421,6 +530,11 @@ export class TeamService {
     const windowMs = opts.windowMs ?? 30 * 24 * 3600_000
     const now = Date.now()
     const since = now - windowMs
+    // Rollup is keyed by 'YYYY-MM-DD' UTC strings; pre-format the bound.
+    // The window is inclusive of the entire `sinceDate` day even when
+    // `since` lands mid-day; under-counting is worse than over-counting
+    // by a few hours of partial-day data on the trailing edge.
+    const sinceDate = new Date(since).toISOString().slice(0, 10)
 
     // Today window starts at the most recent UTC midnight. Cheap lower
     // bound for the KPI 'cost today' card — pulse-style dashboard wants
@@ -429,7 +543,9 @@ export class TeamService {
     todayStart.setUTCHours(0, 0, 0, 0)
     const todaySince = todayStart.getTime()
 
-    // Members + their event totals + role/status.
+    // Members + their event totals + role/status. Joined against the
+    // merged rollup so 30-day SUMs are over (users × nodes × models)
+    // rows, not millions of raw events.
     const memberRows = await this.pool.query<{
       user_id: string
       display_name: string | null
@@ -445,18 +561,18 @@ export class TeamService {
               m.display_name,
               m.role,
               m.status,
-              COALESCE(SUM(e.cost_micro_usd), 0)::bigint AS cost,
-              COUNT(e.sync_event_id)::bigint AS event_count,
-              COALESCE(SUM(e.input_tokens), 0)::bigint AS input_tokens,
-              COALESCE(SUM(e.output_tokens), 0)::bigint AS output_tokens,
-              MAX(e.uploaded_at) AS last_seen_at
+              COALESCE(SUM(d.cost_micro_usd), 0)::bigint AS cost,
+              COALESCE(SUM(d.event_count), 0)::bigint AS event_count,
+              COALESCE(SUM(d.input_tokens), 0)::bigint AS input_tokens,
+              COALESCE(SUM(d.output_tokens), 0)::bigint AS output_tokens,
+              MAX(d.uploaded_at) AS last_seen_at
        FROM team_members m
-       LEFT JOIN usage_events e
-         ON e.team_id = m.team_id AND e.user_id = m.user_id AND e.timestamp >= $2
+       LEFT JOIN v_merged_daily d
+         ON d.team_id = m.team_id AND d.user_id = m.user_id AND d.date >= $2
        WHERE m.team_id = $1
        GROUP BY m.user_id, m.display_name, m.role, m.status
        ORDER BY cost DESC`,
-      [teamId, BigInt(since)],
+      [teamId, sinceDate],
     )
 
     const members: TeamMemberUsage[] = memberRows.rows.map((r) => ({
@@ -476,34 +592,36 @@ export class TeamService {
         ? null
         : (members.find((m) => m.userId === opts.requestingUserId)?.role ?? null)
 
-    // Top projects (using project_hash to group, since redacted is the
-    // expected default; fall back to raw project name when available).
+    // Top projects. v_merged_daily only carries `project_hash` (no raw
+    // project names — rollups are post-redaction), so the dashboard
+    // displays redacted=true for the project card regardless of upload
+    // privacy level. AggregateOnly rows have NULL project_hash and are
+    // excluded; they self-deselect from project-level reporting by
+    // virtue of not sending the dimension upstream.
     const projRows = await this.pool.query<{
       project_key: string
       cost: bigint
       event_count: bigint
-      redacted: boolean
     }>(
       `SELECT
-         COALESCE(NULLIF(project, ''), project_hash, '(unknown)') AS project_key,
-         BOOL_AND(project IS NULL) AS redacted,
+         project_hash AS project_key,
          COALESCE(SUM(cost_micro_usd), 0)::bigint AS cost,
-         COUNT(*)::bigint AS event_count
-       FROM usage_events
-       WHERE team_id = $1 AND timestamp >= $2
-       GROUP BY project_key
+         COALESCE(SUM(event_count), 0)::bigint AS event_count
+       FROM v_merged_daily
+       WHERE team_id = $1 AND date >= $2 AND project_hash IS NOT NULL
+       GROUP BY project_hash
        ORDER BY cost DESC
        LIMIT 8`,
-      [teamId, BigInt(since)],
+      [teamId, sinceDate],
     )
     const topProjects: TeamProjectUsage[] = projRows.rows.map((r) => ({
       projectKey: r.project_key,
-      redacted: r.redacted === true,
+      redacted: true,
       costMicroUsd: r.cost.toString(),
       eventCount: Number(r.event_count),
     }))
 
-    // Per-(provider, model) totals.
+    // Per-(provider, model) totals from the merged rollup.
     const provRows = await this.pool.query<{
       provider: string
       model: string
@@ -512,12 +630,12 @@ export class TeamService {
     }>(
       `SELECT provider, model,
               COALESCE(SUM(cost_micro_usd), 0)::bigint AS cost,
-              COUNT(*)::bigint AS event_count
-       FROM usage_events
-       WHERE team_id = $1 AND timestamp >= $2
+              COALESCE(SUM(event_count), 0)::bigint AS event_count
+       FROM v_merged_daily
+       WHERE team_id = $1 AND date >= $2
        GROUP BY provider, model
        ORDER BY cost DESC`,
-      [teamId, BigInt(since)],
+      [teamId, sinceDate],
     )
     const byProvider: TeamProviderUsage[] = provRows.rows.map((r) => ({
       provider: r.provider,
@@ -549,11 +667,15 @@ export class TeamService {
 
     const totalRow = await this.pool.query<{ cost: bigint; event_count: bigint }>(
       `SELECT COALESCE(SUM(cost_micro_usd), 0)::bigint AS cost,
-              COUNT(*)::bigint AS event_count
-       FROM usage_events WHERE team_id = $1 AND timestamp >= $2`,
-      [teamId, BigInt(since)],
+              COALESCE(SUM(event_count), 0)::bigint AS event_count
+       FROM v_merged_daily WHERE team_id = $1 AND date >= $2`,
+      [teamId, sinceDate],
     )
 
+    // Today's KPI stays on raw events — sub-day granularity is exactly
+    // what this card needs, the window is short (≤24h), and
+    // usage_events_team_ts_idx supports it. Per design.md §"Read API
+    // Boundaries" the bounded-raw rule is satisfied here.
     const todayRow = await this.pool.query<{ cost: bigint }>(
       `SELECT COALESCE(SUM(cost_micro_usd), 0)::bigint AS cost
        FROM usage_events WHERE team_id = $1 AND timestamp >= $2`,

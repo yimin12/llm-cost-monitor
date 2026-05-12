@@ -101,6 +101,7 @@ describe('TeamService', () => {
 
   beforeEach(async () => {
     await pool.query('DELETE FROM sync_conflicts')
+    await pool.query('DELETE FROM event_daily_rollup')
     await pool.query('DELETE FROM daily_aggregates')
     await pool.query('DELETE FROM usage_events')
     await pool.query('DELETE FROM nodes')
@@ -232,6 +233,57 @@ describe('TeamService', () => {
     )
     expect(r1.rows[0]!.ts).toBeDefined()
   })
+
+  // ─── event_daily_rollup invariants (written by TeamService.batchUpsert
+  //     in the same transaction as the raw event INSERT). ───────────────
+
+  it('event-level write also accumulates into event_daily_rollup', async () => {
+    // Two events, same (user, node, day, provider, model, project_hash) →
+    // one rollup row with summed deltas.
+    await svc.batchUpsert('team-A', [
+      evt({ local_event_id: 'a', input_tokens: 10, output_tokens: 5, cost_micro_usd: '100' }),
+      evt({ local_event_id: 'b', input_tokens: 30, output_tokens: 15, cost_micro_usd: '300' }),
+    ])
+    const r = await pool.query<{
+      event_count: bigint
+      input_tokens: bigint
+      output_tokens: bigint
+      cost: bigint
+    }>(
+      `SELECT event_count, input_tokens, output_tokens, cost_micro_usd AS cost
+         FROM event_daily_rollup`,
+    )
+    expect(r.rows).toHaveLength(1)
+    expect(Number(r.rows[0]!.event_count)).toBe(2)
+    expect(Number(r.rows[0]!.input_tokens)).toBe(40)
+    expect(Number(r.rows[0]!.output_tokens)).toBe(20)
+    expect(Number(r.rows[0]!.cost)).toBe(400)
+  })
+
+  it('replayed event does not double-count the rollup (idempotent across retries)', async () => {
+    const one = evt({ local_event_id: 'x', input_tokens: 7, cost_micro_usd: '70' })
+    await svc.batchUpsert('team-A', [one])
+    await svc.batchUpsert('team-A', [one]) // replay
+    const r = await pool.query<{ event_count: bigint; input_tokens: bigint; cost: bigint }>(
+      `SELECT event_count, input_tokens, cost_micro_usd AS cost FROM event_daily_rollup`,
+    )
+    expect(r.rows).toHaveLength(1)
+    expect(Number(r.rows[0]!.event_count)).toBe(1)  // not 2
+    expect(Number(r.rows[0]!.input_tokens)).toBe(7)
+    expect(Number(r.rows[0]!.cost)).toBe(70)
+  })
+
+  it('two nodes for one user keep separate rollup rows (PK includes node_id)', async () => {
+    await svc.batchUpsert('team-A', [
+      evt({ node_id: 'mac', local_event_id: 'm1', cost_micro_usd: '100' }),
+      evt({ node_id: 'linux', local_event_id: 'l1', cost_micro_usd: '200' }),
+    ])
+    const r = await pool.query<{ node_id: string; cost: bigint }>(
+      `SELECT node_id, cost_micro_usd AS cost FROM event_daily_rollup ORDER BY node_id`,
+    )
+    expect(r.rows).toHaveLength(2)
+    expect(r.rows.map((x) => x.node_id)).toEqual(['linux', 'mac'])
+  })
 })
 
 describe('TeamService.getOverview', () => {
@@ -252,6 +304,7 @@ describe('TeamService.getOverview', () => {
 
   beforeEach(async () => {
     await pool.query('DELETE FROM sync_conflicts')
+    await pool.query('DELETE FROM event_daily_rollup')
     await pool.query('DELETE FROM daily_aggregates')
     await pool.query('DELETE FROM usage_events')
     await pool.query('DELETE FROM nodes')
@@ -293,6 +346,26 @@ describe('TeamService.getOverview', () => {
     await svc.batchUpsert('team-A', [evt({ node_id: 'n-1' })])
     const ov = await svc.getOverview('team-A')
     expect(ov.nodes.map((n) => n.nodeId)).toContain('n-1')
+  })
+
+  // §"Query Shapes" merged_usage = rollup(usage_events) UNION ALL daily_aggregates
+  // One user uploads event-level from node-A, another uploads aggregate-only from
+  // node-B. The dashboard total must sum both sources without double-counting.
+  it('merges event-level + aggregateOnly through v_merged_daily', async () => {
+    await svc.batchUpsert('team-A', [
+      evt({ user_id: 'user-1', node_id: 'node-evt', local_event_id: 'e1',
+            cost_micro_usd: '300', input_tokens: 30 }),
+    ])
+    await svc.batchUpsert('team-A', [
+      daily({ user_id: 'user-2', node_id: 'node-agg',
+              date: new Date().toISOString().slice(0, 10),
+              event_count: 5, input_tokens: 200, cost_micro_usd: '700' }),
+    ])
+    const ov = await svc.getOverview('team-A')
+    expect(ov.totalCostMicroUsd).toBe('1000')   // 300 + 700
+    expect(ov.totalEventCount).toBe(6)           // 1 + 5
+    expect(ov.members.find((m) => m.userId === 'user-1')!.costMicroUsd).toBe('300')
+    expect(ov.members.find((m) => m.userId === 'user-2')!.costMicroUsd).toBe('700')
   })
 
   it('returns currentUserRole for the requesting user', async () => {

@@ -86,6 +86,7 @@ describe('end-to-end acceptance (plan.md Phase 5)', () => {
   })
 
   beforeEach(async () => {
+    await serverPool.query('DELETE FROM event_daily_rollup')
     await serverPool.query('DELETE FROM usage_events')
     await serverPool.query('DELETE FROM daily_aggregates')
     await serverPool.query('DELETE FROM nodes')

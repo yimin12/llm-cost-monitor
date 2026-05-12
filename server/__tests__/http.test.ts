@@ -94,6 +94,7 @@ describe('HTTP server', () => {
 
   beforeEach(async () => {
     await pool.query('DELETE FROM sync_conflicts')
+    await pool.query('DELETE FROM event_daily_rollup')
     await pool.query('DELETE FROM daily_aggregates')
     await pool.query('DELETE FROM usage_events')
     await pool.query('DELETE FROM nodes')
