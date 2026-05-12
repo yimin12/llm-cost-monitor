@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 import { PricingTable } from '../../pricing/pricing-table'
 import { parseClaude, parseClaudeFile } from '../claude-code'
 import { parseCodex, parseCodexFile } from '../codex'
+import { parseCursor, parseCursorFile } from '../cursor'
 import { parseGemini, parseGeminiFile } from '../gemini'
 import { simplifyProjectName } from '../project-name'
 
@@ -280,5 +281,121 @@ describe('parseGeminiFile', () => {
     const events = await parseGemini({ pricing: PRICING, geminiHome: dir })
     expect(events).toHaveLength(1)
     expect(events[0]!.project).toBe('foo')
+  })
+})
+
+describe('parseCursorFile', () => {
+  it('normalises Anthropic-shaped usage and tags upstream provider', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'lcm-'))
+    const file = join(dir, 'rollout-2026-05-05T12-00-00-x.jsonl')
+    const lines = [
+      JSON.stringify({
+        timestamp: '2026-05-05T12:00:00.000Z',
+        type: 'session_meta',
+        payload: { id: 'sess-1', cwd: '/Users/me/projects/foo' },
+      }),
+      JSON.stringify({
+        timestamp: '2026-05-05T12:00:01.000Z',
+        type: 'turn_context',
+        payload: { model: 'claude-3-5-sonnet-20240620', provider: 'anthropic', turn_id: 't1' },
+      }),
+      JSON.stringify({
+        timestamp: '2026-05-05T12:00:02.000Z',
+        type: 'event_msg',
+        payload: {
+          type: 'token_count',
+          usage: {
+            input_tokens: 800,
+            output_tokens: 400,
+            cache_read_input_tokens: 100,
+          },
+        },
+      }),
+    ]
+    await writeFile(file, lines.join('\n'))
+
+    const events = await parseCursorFile(file, PRICING)
+    expect(events).toHaveLength(1)
+    const e = events[0]!
+    expect(e.provider).toBe('cursor')
+    expect(e.providerRawTag).toBe('anthropic')
+    expect(e.model).toBe('claude-3-5-sonnet-20240620')
+    expect(e.inputTokens).toBe(800)
+    expect(e.outputTokens).toBe(400)
+    expect(e.cacheReadTokens).toBe(100)
+    // Cursor uses Anthropic Sonnet pricing under the hood — cost > 0.
+    expect(e.computedCostMicroUsd).toBeGreaterThan(0n)
+  })
+
+  it('normalises OpenAI-shaped usage with prompt/completion field names', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'lcm-'))
+    const file = join(dir, 'rollout-openai.jsonl')
+    const lines = [
+      JSON.stringify({ timestamp: '2026-05-05T12:00:00.000Z', type: 'session_meta', payload: { id: 's' } }),
+      JSON.stringify({
+        timestamp: '2026-05-05T12:00:01.000Z',
+        type: 'turn_context',
+        payload: { model: 'gpt-5.5', turn_id: 't' },
+      }),
+      JSON.stringify({
+        timestamp: '2026-05-05T12:00:02.000Z',
+        type: 'event_msg',
+        payload: {
+          type: 'token_count',
+          info: {
+            last_token_usage: {
+              prompt_tokens: 200,
+              completion_tokens: 100,
+              cached_tokens: 50,
+              reasoning_tokens: 20,
+            },
+          },
+        },
+      }),
+    ]
+    await writeFile(file, lines.join('\n'))
+
+    const events = await parseCursorFile(file, PRICING)
+    expect(events).toHaveLength(1)
+    const e = events[0]!
+    expect(e.provider).toBe('cursor')
+    // No explicit provider tag — inferred from gpt-5.5 model name.
+    expect(e.providerRawTag).toBe('openai')
+    expect(e.inputTokens).toBe(200)
+    expect(e.outputTokens).toBe(100)
+    expect(e.cacheReadTokens).toBe(50)
+    expect(e.reasoningTokens).toBe(20)
+  })
+
+  it('discovers rollout files recursively under agent/sessions/<date>/', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'lcm-'))
+    const sub = join(dir, 'agent', 'sessions', '2026', '05', '05')
+    await mkdir(sub, { recursive: true })
+    const lines = [
+      JSON.stringify({ timestamp: '2026-05-05T12:00:00.000Z', type: 'session_meta', payload: { id: 's' } }),
+      JSON.stringify({
+        timestamp: '2026-05-05T12:00:01.000Z',
+        type: 'turn_context',
+        payload: { model: 'gpt-5.5', turn_id: 't' },
+      }),
+      JSON.stringify({
+        timestamp: '2026-05-05T12:00:02.000Z',
+        type: 'event_msg',
+        payload: {
+          type: 'token_count',
+          usage: { prompt_tokens: 10, completion_tokens: 5 },
+        },
+      }),
+    ]
+    await writeFile(join(sub, 'rollout-foo.jsonl'), lines.join('\n'))
+    const events = await parseCursor({ pricing: PRICING, cursorHome: dir })
+    expect(events).toHaveLength(1)
+    expect(events[0]!.provider).toBe('cursor')
+  })
+
+  it('returns [] when cursor home does not exist', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'lcm-'))
+    const events = await parseCursor({ pricing: PRICING, cursorHome: join(dir, 'nope') })
+    expect(events).toEqual([])
   })
 })

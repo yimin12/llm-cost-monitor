@@ -5,6 +5,7 @@ import type { PricingTable } from '../pricing/pricing-table'
 import type { EventRepository } from '../storage/event-repository'
 import type { FileCache } from '../storage/file-cache'
 import { AnthropicProvider } from './anthropic/index'
+import { CursorProvider } from './cursor/index'
 import { GoogleProvider } from './google/index'
 import { OpenAIProvider } from './openai/index'
 
@@ -32,6 +33,7 @@ export class ProviderRegistry {
       new AnthropicProvider(deps),
       new OpenAIProvider(deps),
       new GoogleProvider(deps),
+      new CursorProvider(deps),
     ]
   }
 

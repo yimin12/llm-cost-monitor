@@ -10,6 +10,7 @@ import {
   siAlibabacloud,
   siBytedance,
   siClaude,
+  siCursor,
   siDeepseek,
   siGooglegemini,
   siHuggingface,
@@ -32,6 +33,7 @@ const OPENAI_PATH =
 
 const ICONS: Record<string, BrandIcon> = {
   anthropic: { path: siClaude.path, hex: siClaude.hex },
+  cursor: { path: siCursor.path, hex: siCursor.hex },
   google: { path: siGooglegemini.path, hex: siGooglegemini.hex },
   deepseek: { path: siDeepseek.path, hex: siDeepseek.hex },
   moonshotai: { path: siMoonshotai.path, hex: siMoonshotai.hex },
