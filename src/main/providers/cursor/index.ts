@@ -7,6 +7,7 @@ import type { PricingTable } from '../../pricing/pricing-table'
 import type { EventRepository } from '../../storage/event-repository'
 import type { FileCache } from '../../storage/file-cache'
 import { detectCursorPlan, resolveCursorStateDb } from './plan'
+import { fetchCursorUsageEvents } from './usage'
 
 export interface CursorProviderDeps {
   pricing: PricingTable
@@ -65,10 +66,17 @@ export class CursorProvider implements AIProvider {
   }
 
   private async refreshImpl(): Promise<UsageSnapshot> {
-    const events = await parseCursor({
-      pricing: this.deps.pricing,
-      fileCache: this.deps.fileCache,
-    })
+    // Two complementary sources:
+    //   - parseCursor reads cursor-agent CLI rollouts (if installed).
+    //   - fetchCursorUsageEvents hits cursor.com/api/usage and synthesizes
+    //     one event per request from the per-model cycle totals.
+    // Both write into the same event repository; ids are deterministic, so
+    // overlapping refreshes upsert cleanly rather than double-counting.
+    const [cliEvents, apiEvents] = await Promise.all([
+      parseCursor({ pricing: this.deps.pricing, fileCache: this.deps.fileCache }),
+      fetchCursorUsageEvents({ pricing: this.deps.pricing }).catch(() => [] as never[]),
+    ])
+    const events = [...cliEvents, ...apiEvents]
     if (events.length > 0) await this.deps.events.upsertMany(events)
     const snap = emptySnapshot(this.id)
     this.latest = snap

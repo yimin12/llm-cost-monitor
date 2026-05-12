@@ -1,21 +1,24 @@
 import { readFile } from 'node:fs/promises'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
-
-import { decodeJwt } from 'jose'
 
 import { unknownPlan, type PlanInfo } from '@shared/plan-info'
 
 import { resolveCursorHome } from '../../parsers/cursor'
+import {
+  buildCursorCookie,
+  emailFromCursorJwt,
+  readCursorAccessToken,
+  resolveCursorStateDb,
+} from './credentials'
+
+// Re-export so existing callers (CursorProvider) keep working unchanged.
+export { resolveCursorStateDb } from './credentials'
 
 // Cursor stores its session token in the VS Code SQLite store it inherits:
 //
 //   macOS:   ~/Library/Application Support/Cursor/User/globalStorage/state.vscdb
 //   Linux:   ~/.config/Cursor/User/globalStorage/state.vscdb
 //   Windows: %APPDATA%/Cursor/User/globalStorage/state.vscdb
-//
-// Key in `ItemTable` is `cursorAuth/accessToken`. The token format is either
-// raw JWT or `${workosUserId}::${jwt}` — we strip the prefix and decode.
 //
 // Tier lives on the customer's Stripe profile and is most reliably read from
 // `GET https://cursor.com/api/auth/stripe`, authenticated with the cookie
@@ -42,22 +45,14 @@ interface CursorMeProfile {
   tier?: string
 }
 
-interface CursorJwtClaims {
-  sub?: string
-  email?: string
-}
-
 export interface CursorPlanDeps {
-  // Override the SQLite DB path (used in tests).
   cursorStateDb?: string
-  // Override the cursor-agent home (legacy auth.json path, still consulted as fallback).
+  // Legacy cursor-agent CLI auth.json path, still consulted as fallback.
   cursorHome?: string
   env?: NodeJS.ProcessEnv
   platform?: NodeJS.Platform
   fetchImpl?: typeof fetch
-  // Test seam: when provided, this function is used to read
-  // `cursorAuth/accessToken` from the SQLite ItemTable instead of opening
-  // the DB. Default opens better-sqlite3 in readonly mode.
+  // Test seam: override the SQLite reader.
   readAccessToken?: (dbPath: string) => Promise<string | null>
 }
 
@@ -77,78 +72,6 @@ const PLAN_LABEL: Record<string, string> = {
 function labelFor(raw: string | null | undefined): string | null {
   if (raw === null || raw === undefined || raw === '') return null
   return PLAN_LABEL[raw.toLowerCase().replace(/-/g, '_')] ?? raw
-}
-
-export function resolveCursorStateDb(
-  env: NodeJS.ProcessEnv = process.env,
-  platform: NodeJS.Platform = process.platform,
-): string {
-  const override = env['CURSOR_STATE_DB']
-  if (override !== undefined && override.length > 0) return override
-  const home = homedir()
-  if (platform === 'darwin') {
-    return join(home, 'Library', 'Application Support', 'Cursor', 'User', 'globalStorage', 'state.vscdb')
-  }
-  if (platform === 'win32') {
-    const appData = env['APPDATA'] ?? join(home, 'AppData', 'Roaming')
-    return join(appData, 'Cursor', 'User', 'globalStorage', 'state.vscdb')
-  }
-  return join(home, '.config', 'Cursor', 'User', 'globalStorage', 'state.vscdb')
-}
-
-// Default DB reader: lazy-loads better-sqlite3 so the module remains usable
-// in environments where the native binding can't be compiled (CI runners,
-// the server build). Opens the file readonly so we don't block a running
-// Cursor.app; if the DB doesn't exist or the binding is missing, returns null.
-async function defaultReadAccessToken(dbPath: string): Promise<string | null> {
-  try {
-    const { default: Database } = (await import('better-sqlite3')) as {
-      default: new (path: string, opts?: { readonly?: boolean; fileMustExist?: boolean }) => {
-        prepare: (sql: string) => { get: (...args: unknown[]) => unknown }
-        close: () => void
-      }
-    }
-    const db = new Database(dbPath, { readonly: true, fileMustExist: true })
-    try {
-      const row = db.prepare("SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken'").get() as
-        | { value?: string | Buffer }
-        | undefined
-      if (row === undefined) return null
-      const v = row.value
-      if (v === undefined || v === null) return null
-      return typeof v === 'string' ? v : v.toString('utf8')
-    } finally {
-      db.close()
-    }
-  } catch {
-    return null
-  }
-}
-
-function splitToken(stored: string): { userId: string | null; token: string } {
-  const sep = stored.indexOf('::')
-  if (sep > 0) {
-    return { userId: stored.slice(0, sep), token: stored.slice(sep + 2) }
-  }
-  return { userId: null, token: stored }
-}
-
-function userIdFromJwt(token: string): string | null {
-  try {
-    const claims = decodeJwt<CursorJwtClaims>(token)
-    return claims.sub ?? null
-  } catch {
-    return null
-  }
-}
-
-function emailFromJwt(token: string): string | null {
-  try {
-    const claims = decodeJwt<CursorJwtClaims>(token)
-    return claims.email ?? null
-  } catch {
-    return null
-  }
 }
 
 const STRIPE_URL = 'https://cursor.com/api/auth/stripe'
@@ -215,30 +138,22 @@ export async function detectCursorPlan(deps: CursorPlanDeps = {}): Promise<PlanI
   const env = deps.env ?? process.env
   const platform = deps.platform ?? process.platform
   const fetchImpl = deps.fetchImpl ?? fetch
-  const readAccessToken = deps.readAccessToken ?? defaultReadAccessToken
+  const readAccessToken = deps.readAccessToken ?? readCursorAccessToken
   const stateDb = deps.cursorStateDb ?? resolveCursorStateDb(env, platform)
   const cursorHome = deps.cursorHome ?? resolveCursorHome(env)
 
-  // 1) Cursor IDE session token in the VS Code SQLite store. This is what's
-  //    populated when the user logs in via the desktop app — covers the
-  //    vast majority of paid Cursor users.
+  // 1) Cursor IDE session token in the VS Code SQLite store.
   const stored = await readAccessToken(stateDb)
   if (stored !== null && stored.length > 0) {
-    const { userId: tokenPrefixUid, token } = splitToken(stored)
-    const userId = tokenPrefixUid ?? userIdFromJwt(token)
-    const email = emailFromJwt(token)
-    const cookie =
-      userId !== null
-        ? `WorkosCursorSessionToken=${userId}::${token}`
-        : `WorkosCursorSessionToken=${token}`
+    const { cookie, token } = buildCursorCookie(stored)
+    const email = emailFromCursorJwt(token)
 
     const stripe = await fetchJson<CursorStripeProfile>(STRIPE_URL, cookie, fetchImpl)
     let tier = stripe !== null ? tierFromStripe(stripe) : null
     let isTeam = stripe?.isTeamMember === true
 
     // Enterprise / team disambiguation: /api/auth/me's `plan` string
-    // sometimes carries "enterprise" where stripe shows "team". We only
-    // upgrade the label — don't downgrade.
+    // sometimes carries "enterprise" where stripe shows "team".
     if (tier === null || tier === 'team' || isTeam) {
       const me = await fetchJson<CursorMeProfile>(ME_URL, cookie, fetchImpl)
       const mePlan = (me?.plan ?? me?.subscription?.plan ?? me?.subscriptionTier ?? me?.tier ?? '')
@@ -258,8 +173,6 @@ export async function detectCursorPlan(deps: CursorPlanDeps = {}): Promise<PlanI
         detail: email,
       }
     }
-    // Token present but tier-fetch failed (offline, token expired,
-    // endpoint changed). Surface that as oauth rather than guessing.
     return {
       authMode: 'oauth',
       planName: 'Cursor Account',
