@@ -74,6 +74,21 @@ export class AlertRepository {
     return r.rows[0] !== undefined ? rowToAlert(r.rows[0]) : null
   }
 
+  // Clamp severity of open cost.* alerts to 'warning' when the user is
+  // exclusively on subscription plans — the projected $ figure isn't
+  // out-of-pocket cost in that case, so a red "critical" chip is misleading.
+  // Returns the number of rows downgraded.
+  async downgradeOpenCostAlertsToWarning(): Promise<number> {
+    const r = await this.pool.query(
+      `UPDATE alerts
+       SET severity = 'warning'
+       WHERE severity = 'critical'
+         AND status IN ('open', 'snoozed', 'acked')
+         AND type LIKE 'cost.%'`,
+    )
+    return r.rowCount ?? 0
+  }
+
   // Move snoozed alerts back to open when their snooze window has passed.
   // Called by the sampler before each evaluation pass.
   async unsnoozeExpired(now: number = Date.now()): Promise<number> {

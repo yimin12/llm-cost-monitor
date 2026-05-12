@@ -1,6 +1,7 @@
 import os from 'node:os'
 
 import type { Aggregator } from '../aggregation/aggregator'
+import type { ProviderRegistry } from '../providers/registry'
 import type { SettingsStore } from '../settings/store'
 import type { AlertRepository, RaiseInput } from './alert-repository'
 
@@ -54,8 +55,24 @@ export class AlertSampler {
     private readonly repo: AlertRepository,
     private readonly aggregator: Aggregator,
     private readonly settings: SettingsStore,
+    // Optional so existing tests don't need an explicit registry. When set,
+    // we clamp cost-alert severity to 'warning' if any active provider is
+    // on a paid subscription (projected $ then isn't out-of-pocket money).
+    private readonly providers: Pick<ProviderRegistry, 'describe'> | null,
     private readonly cb: SamplerCallbacks,
   ) {}
+
+  // Sample once per tick — cheap (no network), but call sites only need it
+  // for cost-alert severity decisions, not CPU/mem.
+  private async hasSubscriptionProvider(): Promise<boolean> {
+    if (this.providers === null) return false
+    try {
+      const list = await this.providers.describe()
+      return list.some((p) => p.plan?.authMode === 'subscription')
+    } catch {
+      return false
+    }
+  }
 
   start(): void {
     if (this.timer !== null) return
@@ -128,6 +145,17 @@ export class AlertSampler {
     const snap = await this.aggregator.snapshot()
     const todayUsd = Number(snap.today.costMicroUsd) / 1_000_000
 
+    // When the user is on a paid subscription (Claude Max, ChatGPT Plus/Pro,
+    // Gemini Pro/Ultra, Cursor Pro/Ultra, …) the projected dollar figure is
+    // a token-equivalent valuation, not actual out-of-pocket money. We clamp
+    // cost-alert severity to 'warning' and downgrade any prior 'critical'
+    // open alerts so the red chip doesn't misrepresent risk.
+    const subscriptionActive = await this.hasSubscriptionProvider()
+    if (subscriptionActive) {
+      const downgraded = await this.repo.downgradeOpenCostAlertsToWarning()
+      if (downgraded > 0) anyChange = true
+    }
+
     if (
       settings.alerts.thresholds.dailyCostUsd !== null &&
       todayUsd >= settings.alerts.thresholds.dailyCostUsd
@@ -149,14 +177,21 @@ export class AlertSampler {
     ) {
       const forecastUsd = Number(snap.forecast.estimateMicroUsd) / 1_000_000
       if (forecastUsd >= settings.alerts.thresholds.monthlyForecastUsd) {
+        const wouldBeCritical =
+          forecastUsd >= settings.alerts.thresholds.monthlyForecastUsd * 1.25
+        const severity =
+          wouldBeCritical && !subscriptionActive ? 'critical' : 'warning'
         const inserted = await this.maybeRaise({
           type: 'cost.forecast',
-          severity: forecastUsd >= settings.alerts.thresholds.monthlyForecastUsd * 1.25
-            ? 'critical' : 'warning',
+          severity,
           title: 'Month-end LLM forecast above budget',
           body: `projected spend is ~$${forecastUsd.toFixed(2)}, above your $${settings.alerts.thresholds.monthlyForecastUsd} budget.`,
           signature: `cost.forecast.${new Date().toISOString().slice(0, 7)}`,
-          metadata: { forecastUsd, threshold: settings.alerts.thresholds.monthlyForecastUsd },
+          metadata: {
+            forecastUsd,
+            threshold: settings.alerts.thresholds.monthlyForecastUsd,
+            subscriptionActive,
+          },
         })
         if (inserted !== null) raises.push(inserted)
       }
