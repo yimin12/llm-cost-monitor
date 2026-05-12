@@ -46,7 +46,7 @@ export const PROVIDER_COLOR: Record<string, string> = {
   anthropic: '#d4a373',
   openai: '#10a37f',
   google: '#4285f4',
-  cursor: '#1f1f1f',
+  cursor: '#cdd2d6',
   moonshotai: '#9b87f5',
   deepseek: '#5b8def',
   xai: '#cdd2d6',
