@@ -160,6 +160,119 @@ describe('end-to-end acceptance (plan.md Phase 5)', () => {
     await linuxClient.cleanup()
   })
 
+  // Matches the headline example in docs/multi-node-usage-merge-design.md
+  // §"Claude Multi-node Example". If this test ever drifts from the doc,
+  // either the doc or the merge math is wrong — both directions are bugs.
+  it('design example: macbook $0.18 + linux $0.47 = $0.65 across 42k/3k tokens', async () => {
+    const mac = await makeClient({ userId: 'user-1', nodeId: 'macbook', privacyLevel: 'redacted' })
+    const linux = await makeClient({ userId: 'user-1', nodeId: 'linux-box', privacyLevel: 'redacted' })
+
+    await mac.events.upsertMany([
+      makeEvent({
+        id: 'mac-1', timestamp: NOW,
+        inputTokens: 12000, outputTokens: 900, cacheReadTokens: 8000,
+        computedCostMicroUsd: 180_000n,
+      }),
+    ])
+    await linux.events.upsertMany([
+      makeEvent({
+        id: 'linux-1', timestamp: NOW + 1,
+        inputTokens: 30000, outputTokens: 2100, cacheReadTokens: 16000,
+        computedCostMicroUsd: 470_000n,
+      }),
+    ])
+
+    expect((await mac.queue.drain(mac.cfg)).error).toBeNull()
+    expect((await linux.queue.drain(linux.cfg)).error).toBeNull()
+
+    const ov = await (await fetch(`${baseUrl}/v1/teams/team-A/usage`, {
+      headers: { Authorization: 'Bearer user-1' },
+    })).json() as {
+      totalCostMicroUsd: string
+      totalEventCount: number
+      activeNodes: number
+      members: { userId: string; inputTokens: number; outputTokens: number }[]
+      nodes: { nodeId: string }[]
+    }
+
+    // Sums copied verbatim from the design doc — do not adjust without
+    // also updating docs/multi-node-usage-merge-design.md.
+    expect(ov.totalCostMicroUsd).toBe('650000')   // $0.65
+    expect(ov.totalEventCount).toBe(2)
+    expect(ov.activeNodes).toBe(2)
+    const alice = ov.members.find((m) => m.userId === 'user-1')!
+    expect(alice.inputTokens).toBe(42000)
+    expect(alice.outputTokens).toBe(3000)
+    expect(ov.nodes.map((n) => n.nodeId).sort()).toEqual(['linux-box', 'macbook'])
+
+    await mac.cleanup()
+    await linux.cleanup()
+  })
+
+  // Two clients fetching /usage at roughly the same time must see the same
+  // numbers, ordering, and shape. `generatedAt` is the only field allowed
+  // to differ — it's the per-request timestamp, not the data.
+  it('read consistency: concurrent /usage requests return identical bodies modulo generatedAt', async () => {
+    const c = await makeClient({ userId: 'user-1', nodeId: 'n-1', privacyLevel: 'redacted' })
+    await c.events.upsertMany([
+      makeEvent({ id: 'e1', timestamp: NOW, computedCostMicroUsd: 100n }),
+      makeEvent({ id: 'e2', timestamp: NOW + 1, computedCostMicroUsd: 200n }),
+    ])
+    await c.queue.drain(c.cfg)
+
+    const headers = { Authorization: 'Bearer user-1' }
+    const [a, b] = await Promise.all([
+      fetch(`${baseUrl}/v1/teams/team-A/usage`, { headers }).then((r) => r.json()),
+      fetch(`${baseUrl}/v1/teams/team-A/usage`, { headers }).then((r) => r.json()),
+    ])
+    // Strip generatedAt before deep equality.
+    const stripGen = (o: unknown): unknown => {
+      const cloned = JSON.parse(JSON.stringify(o)) as Record<string, unknown>
+      delete cloned['generatedAt']
+      return cloned
+    }
+    expect(stripGen(a)).toEqual(stripGen(b))
+    await c.cleanup()
+  })
+
+  // Once a row is on the server, a second drain from a *different* SyncQueue
+  // instance for the same user/node (e.g. fresh dev rebuild or replay tool)
+  // must dedupe via sync_event_id PK, not double-count. Pairs with
+  // §"Server Write Path" — "repeated rows become primary-key lookups".
+  it('cross-instance replay: re-drain from a fresh queue → duplicates, totals unchanged', async () => {
+    const first = await makeClient({
+      userId: 'user-1', nodeId: 'replay-node', privacyLevel: 'redacted',
+    })
+    await first.events.upsertMany([
+      makeEvent({ id: 'r1', timestamp: NOW, computedCostMicroUsd: 100n }),
+      makeEvent({ id: 'r2', timestamp: NOW + 1, computedCostMicroUsd: 200n }),
+    ])
+    const out1 = await first.queue.drain(first.cfg)
+    expect(out1.accepted).toBe(2)
+    expect(out1.duplicates).toBe(0)
+    await first.cleanup()
+
+    // Brand-new client DB, same user + node → the outbox build hash will
+    // re-derive the same sync_event_ids; server must report duplicates.
+    const second = await makeClient({
+      userId: 'user-1', nodeId: 'replay-node', privacyLevel: 'redacted',
+    })
+    await second.events.upsertMany([
+      makeEvent({ id: 'r1', timestamp: NOW, computedCostMicroUsd: 100n }),
+      makeEvent({ id: 'r2', timestamp: NOW + 1, computedCostMicroUsd: 200n }),
+    ])
+    const out2 = await second.queue.drain(second.cfg)
+    expect(out2.accepted).toBe(0)
+    expect(out2.duplicates).toBe(2)
+
+    const ov = await (await fetch(`${baseUrl}/v1/teams/team-A/usage`, {
+      headers: { Authorization: 'Bearer user-1' },
+    })).json() as { totalEventCount: number; totalCostMicroUsd: string }
+    expect(ov.totalEventCount).toBe(2)
+    expect(ov.totalCostMicroUsd).toBe('300')
+    await second.cleanup()
+  })
+
   it('redacted mode never uploads raw project name, session id, or message id', async () => {
     const c = await makeClient({ userId: 'user-1', nodeId: 'n', privacyLevel: 'redacted' })
     await c.events.upsertMany([makeEvent({ id: 'e1', timestamp: NOW })])
