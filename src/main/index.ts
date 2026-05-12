@@ -263,7 +263,7 @@ void app.whenReady().then(async () => {
   const alertRepo = new AlertRepository(pool)
   alerts = alertRepo
   const notifier = new AlertNotifier(settings)
-  const sampler = new AlertSampler(alertRepo, aggregator, settings, {
+  const sampler = new AlertSampler(alertRepo, aggregator, settings, providers, {
     onRaise: (raises) => notifier.fire(raises),
     onAnyChange: () => {
       broadcastAlertsUpdated()
