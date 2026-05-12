@@ -210,6 +210,100 @@ describe('end-to-end acceptance (plan.md Phase 5)', () => {
     await linux.cleanup()
   })
 
+  // Many-members-one-team. Mirrors the curl-based LAN demo: alice runs
+  // two machines, bob runs one, all on team-A. Every member of the team
+  // (and every machine fetching /usage) must see the same team-wide
+  // total and the same per-member breakdown. Asserts both the merged
+  // sums and the per-row identity columns.
+  it('team dashboard: team total + each member shown separately, identical for every viewer', async () => {
+    const aliceMac = await makeClient({
+      userId: 'user-1', nodeId: 'macbook', privacyLevel: 'redacted',
+    })
+    const aliceLinux = await makeClient({
+      userId: 'user-1', nodeId: 'linux-alice', privacyLevel: 'redacted',
+    })
+    const bobLinux = await makeClient({
+      userId: 'user-2', nodeId: 'linux-bob', privacyLevel: 'redacted',
+    })
+
+    await aliceMac.events.upsertMany([
+      makeEvent({
+        id: 'a-mac-1', timestamp: NOW,
+        inputTokens: 12000, outputTokens: 900, computedCostMicroUsd: 180_000n,
+      }),
+    ])
+    await aliceLinux.events.upsertMany([
+      makeEvent({
+        id: 'a-linux-1', timestamp: NOW + 1,
+        inputTokens: 30000, outputTokens: 2100, computedCostMicroUsd: 470_000n,
+      }),
+    ])
+    await bobLinux.events.upsertMany([
+      makeEvent({
+        id: 'b-linux-1', timestamp: NOW + 2,
+        inputTokens: 8000, outputTokens: 600, computedCostMicroUsd: 250_000n,
+      }),
+    ])
+
+    expect((await aliceMac.queue.drain(aliceMac.cfg)).error).toBeNull()
+    expect((await aliceLinux.queue.drain(aliceLinux.cfg)).error).toBeNull()
+    expect((await bobLinux.queue.drain(bobLinux.cfg)).error).toBeNull()
+
+    // Both members fetch the team dashboard.
+    const [aliceView, bobView] = await Promise.all([
+      fetch(`${baseUrl}/v1/teams/team-A/usage`, {
+        headers: { Authorization: 'Bearer user-1' },
+      }).then((r) => r.json()),
+      fetch(`${baseUrl}/v1/teams/team-A/usage`, {
+        headers: { Authorization: 'Bearer user-2' },
+      }).then((r) => r.json()),
+    ])
+
+    // Team-wide totals visible to every member.
+    type Overview = {
+      totalCostMicroUsd: string
+      totalEventCount: number
+      activeMembers: number
+      currentUserRole: string | null
+      members: { userId: string; costMicroUsd: string; eventCount: number;
+                 inputTokens: number; outputTokens: number }[]
+    }
+    for (const ov of [aliceView, bobView] as Overview[]) {
+      expect(ov.totalCostMicroUsd).toBe('900000')   // 180k + 470k + 250k
+      expect(ov.totalEventCount).toBe(3)
+      expect(ov.activeMembers).toBe(2)
+
+      // Per-member rows — alice's 2 nodes merge into one row.
+      const alice = ov.members.find((m) => m.userId === 'user-1')!
+      const bob   = ov.members.find((m) => m.userId === 'user-2')!
+      expect(alice.costMicroUsd).toBe('650000')     // 180k + 470k
+      expect(alice.eventCount).toBe(2)
+      expect(alice.inputTokens).toBe(42000)         // 12k + 30k
+      expect(alice.outputTokens).toBe(3000)         // 900 + 2100
+      expect(bob.costMicroUsd).toBe('250000')
+      expect(bob.eventCount).toBe(1)
+      expect(bob.inputTokens).toBe(8000)
+      expect(bob.outputTokens).toBe(600)
+    }
+
+    // Identity-sensitive columns: viewer-specific role, otherwise identical.
+    expect((aliceView as Overview).currentUserRole).toBe('admin')  // first member auto-admin
+    expect((bobView   as Overview).currentUserRole).toBe('member')
+
+    // Strip viewer-specific bits and confirm everything else is byte-equal.
+    const stripViewerFields = (o: unknown): unknown => {
+      const cloned = JSON.parse(JSON.stringify(o)) as Record<string, unknown>
+      delete cloned['generatedAt']
+      delete cloned['currentUserRole']
+      return cloned
+    }
+    expect(stripViewerFields(aliceView)).toEqual(stripViewerFields(bobView))
+
+    await aliceMac.cleanup()
+    await aliceLinux.cleanup()
+    await bobLinux.cleanup()
+  })
+
   // Two clients fetching /usage at roughly the same time must see the same
   // numbers, ordering, and shape. `generatedAt` is the only field allowed
   // to differ — it's the per-request timestamp, not the data.
