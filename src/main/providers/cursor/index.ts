@@ -6,7 +6,7 @@ import { parseCursor, resolveCursorHome } from '../../parsers/cursor'
 import type { PricingTable } from '../../pricing/pricing-table'
 import type { EventRepository } from '../../storage/event-repository'
 import type { FileCache } from '../../storage/file-cache'
-import { detectCursorPlan } from './plan'
+import { detectCursorPlan, resolveCursorStateDb } from './plan'
 
 export interface CursorProviderDeps {
   pricing: PricingTable
@@ -31,10 +31,21 @@ export class CursorProvider implements AIProvider {
   }
 
   async isAvailable(): Promise<boolean> {
-    const home = resolveCursorHome()
+    // Cursor surfaces on a machine via either:
+    //   - the Cursor IDE (state.vscdb in the VS Code-style globalStorage), or
+    //   - the cursor-agent CLI (~/.cursor/agent/).
+    // Plan detection works off the first; usage-event parsing works off the
+    // second. Either alone is "installed enough" to render the card as
+    // active rather than dim.
+    const fs = await import('node:fs/promises')
     try {
-      const fs = await import('node:fs/promises')
-      const s = await fs.stat(`${home}/agent`)
+      await fs.stat(resolveCursorStateDb())
+      return true
+    } catch {
+      /* fall through to cursor-agent check */
+    }
+    try {
+      const s = await fs.stat(`${resolveCursorHome()}/agent`)
       return s.isDirectory()
     } catch {
       return false
