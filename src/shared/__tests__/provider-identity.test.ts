@@ -30,6 +30,11 @@ describe('ProviderIdentity', () => {
     expect(canonical('mistralai')).toBe('mistralai')
   })
 
+  it('cursor aliases canonicalize to cursor', () => {
+    expect(canonical('cursor')).toBe('cursor')
+    expect(canonical('cursor-agent')).toBe('cursor')
+  })
+
   it('ai21 (digit-bearing) preserved by explicit allowlist', () => {
     expect(canonical('ai21')).toBe('ai21')
   })

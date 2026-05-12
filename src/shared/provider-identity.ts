@@ -35,6 +35,11 @@ const KNOWN_ALIASES: Record<string, string> = {
   mistral: 'mistralai',
   mistralai: 'mistralai',
   ai21: 'ai21',
+  // Cursor is an aggregator IDE/CLI that proxies many models. We treat
+  // `cursor` as the canonical provider for events written by the Cursor
+  // Agent CLI; the underlying model is still surfaced on the event.
+  cursor: 'cursor',
+  cursor_agent: 'cursor',
 }
 
 function normalize(segment: string): string {

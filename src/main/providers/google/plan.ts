@@ -71,19 +71,35 @@ function tierIdLabel(id: string | undefined): string | null {
   return null
 }
 
-// Decide the plan label. Preference order:
-//   1. paidTier.name  — Pro/Ultra/Enterprise users, condensed to one
-//      word.
-//   2. currentTier.name — non-paid users with a server-provided name.
+// Decide the plan label + whether it's a paid subscription. Preference order:
+//   1. paidTier.name  — Pro/Ultra/Enterprise users, condensed to one word.
+//      Paid by definition.
+//   2. currentTier.name — non-paid users (Free / Legacy) with a server-
+//      provided name. Marked paid only if the label clearly says so.
 //   3. tierIdLabel(paidTier.id ?? currentTier.id) — internal slugs.
-function planNameFromCodeAssist(r: LoadCodeAssistResponse): string | null {
+//
+// We need the paid/unpaid bit at the call site so the chip renders as
+// `subscription` (gold "Plan: Pro") vs `oauth` (neutral "Google Account") —
+// "subscription" should be reserved for tiers the user is actually paying for.
+function planNameFromCodeAssist(
+  r: LoadCodeAssistResponse,
+): { name: string; isPaid: boolean } | null {
   if (r.paidTier?.name !== undefined && r.paidTier.name.length > 0) {
-    return shortenTierName(r.paidTier.name)
+    return { name: shortenTierName(r.paidTier.name), isPaid: true }
+  }
+  if (r.paidTier?.id !== undefined) {
+    const idLabel = tierIdLabel(r.paidTier.id)
+    if (idLabel !== null) return { name: idLabel, isPaid: idLabel !== 'Free' && idLabel !== 'Legacy' }
   }
   if (r.currentTier?.name !== undefined && r.currentTier.name.length > 0) {
-    return shortenTierName(r.currentTier.name)
+    const label = shortenTierName(r.currentTier.name)
+    // Treat anything that doesn't read as Free/Legacy as paid — Standard
+    // and above are billable Code Assist plans.
+    return { name: label, isPaid: label !== 'Free' && label !== 'Legacy' }
   }
-  return tierIdLabel(r.paidTier?.id) ?? tierIdLabel(r.currentTier?.id)
+  const idLabel = tierIdLabel(r.currentTier?.id)
+  if (idLabel !== null) return { name: idLabel, isPaid: idLabel !== 'Free' && idLabel !== 'Legacy' }
+  return null
 }
 
 async function fetchCodeAssistTier(
@@ -161,28 +177,31 @@ export async function detectGooglePlan(deps: GooglePlanDeps = {}): Promise<PlanI
     // Try Google's Code Assist loadCodeAssist endpoint to surface the
     // real subscription tier (Free / Standard / Google One AI Pro /
     // Legacy). The Gemini CLI itself uses this endpoint to print its
-    // "Plan: …" banner. We only attempt it when the cached access
-    // token is still valid — refreshing is the Gemini CLI's job, not
-    // ours; on the next refresh tick we'll pick up the new token.
-    const tokenStillValid =
-      typeof creds.access_token === 'string' &&
-      creds.access_token.length > 0 &&
-      (creds.expiry_date === undefined || creds.expiry_date > Date.now())
-    let codeAssistName: string | null = null
-    if (tokenStillValid) {
-      const tier = await fetchCodeAssistTier(creds.access_token!, fetchImpl)
-      if (tier !== null) codeAssistName = planNameFromCodeAssist(tier)
+    // "Plan: …" banner. We attempt the call whenever we have an
+    // access_token at all — Google's 401 on an expired token is the
+    // authoritative signal, and the locally-cached `expiry_date` lags
+    // behind whatever the CLI has refreshed to. If we get null back,
+    // the user needs to run the Gemini CLI to refresh the token (we
+    // deliberately don't refresh ourselves — that would require
+    // embedding the CLI's OAuth client credentials).
+    let codeAssistResult: { name: string; isPaid: boolean } | null = null
+    if (typeof creds.access_token === 'string' && creds.access_token.length > 0) {
+      const tier = await fetchCodeAssistTier(creds.access_token, fetchImpl)
+      if (tier !== null) codeAssistResult = planNameFromCodeAssist(tier)
     }
-    if (codeAssistName !== null) {
+    if (codeAssistResult !== null) {
       return {
-        authMode: 'subscription',
-        planName: codeAssistName,
+        // Reserve `subscription` for paid tiers (Pro / Ultra / Standard /
+        // Enterprise). Free / Legacy stay in OAuth-mode so the chip
+        // doesn't pretend the user is paying when they aren't.
+        authMode: codeAssistResult.isPaid ? 'subscription' : 'oauth',
+        planName: codeAssistResult.name,
         source: credsPath,
         detail: email,
       }
     }
-    // Fallback when the Code Assist endpoint is unreachable, the
-    // token's expired, or the response shape is unfamiliar.
+    // Fallback when the Code Assist endpoint is unreachable (offline /
+    // 5xx / refresh failed / response shape unfamiliar).
     return {
       authMode: 'oauth',
       planName: hostedDomain !== null ? 'Workspace Account' : 'Google Account',

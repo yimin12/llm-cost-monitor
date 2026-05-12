@@ -141,7 +141,7 @@ describe('detectGooglePlan', () => {
     expect(plan.planName).toBe('Ultra')
   })
 
-  it('prefers currentTier.name and condenses it', async () => {
+  it('returns currentTier.name=Free as oauth, not subscription', async () => {
     const idToken = fakeJwt({ email: 'g@example.com' })
     await writeFile(
       join(dir, 'oauth_creds.json'),
@@ -154,7 +154,10 @@ describe('detectGooglePlan', () => {
         currentTier: { id: 'free-tier', name: 'Gemini Code Assist Free' },
       }),
     })
-    expect(plan.authMode).toBe('subscription')
+    // Free is signed-in-but-not-paying. Pro / Ultra / Standard would be
+    // `subscription`; Free / Legacy stay as `oauth` so the chip doesn't
+    // mislead.
+    expect(plan.authMode).toBe('oauth')
     expect(plan.planName).toBe('Free')
   })
 
@@ -172,25 +175,42 @@ describe('detectGooglePlan', () => {
     expect(plan.planName).toBe('Standard')
   })
 
-  it('falls back to Google Account when the access token is expired (no Code Assist call attempted)', async () => {
+  it('still attempts Code Assist when the cached expiry_date says expired (server is the source of truth)', async () => {
     const idToken = fakeJwt({ email: 'g@example.com' })
     await writeFile(
       join(dir, 'oauth_creds.json'),
-      JSON.stringify({ access_token: 'a', id_token: idToken, expiry_date: Date.now() - 60_000 }),
+      JSON.stringify({
+        access_token: 'tok',
+        id_token: idToken,
+        // expiry_date is in the past — but the CLI may have refreshed it
+        // since we read; only the server can confirm.
+        expiry_date: Date.now() - 60_000,
+      }),
     )
     let called = false
-    const plan = await detectGooglePlan({
-      geminiHome: dir,
-      env: {},
-      fetchImpl: ((): typeof fetch => {
-        const f: typeof fetch = async () => {
-          called = true
-          return new Response('', { status: 200 }) as unknown as Response
-        }
-        return f
-      })(),
-    })
-    expect(called).toBe(false)
+    const fetchImpl = (async () => {
+      called = true
+      return new Response(
+        JSON.stringify({ paidTier: { name: 'Gemini Code Assist in Google One AI Pro' } }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      )
+    }) as unknown as typeof fetch
+
+    const plan = await detectGooglePlan({ geminiHome: dir, env: {}, fetchImpl })
+    expect(called).toBe(true)
+    expect(plan.authMode).toBe('subscription')
+    expect(plan.planName).toBe('Pro')
+  })
+
+  it('falls back to Google Account when Code Assist returns 401 (token actually rejected)', async () => {
+    const idToken = fakeJwt({ email: 'g@example.com' })
+    await writeFile(
+      join(dir, 'oauth_creds.json'),
+      JSON.stringify({ access_token: 'tok', id_token: idToken }),
+    )
+    const fetchImpl = (async () =>
+      new Response('Unauthorized', { status: 401 })) as unknown as typeof fetch
+    const plan = await detectGooglePlan({ geminiHome: dir, env: {}, fetchImpl })
     expect(plan.authMode).toBe('oauth')
     expect(plan.planName).toBe('Google Account')
   })

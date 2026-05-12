@@ -64,14 +64,26 @@ describe('loadAuthSecrets', () => {
     expect(r?.source).toBe('env')
   })
 
-  it('mixed: env clientId, bundled secret → source=mixed', () => {
+  it('env clientId without env secret does NOT borrow the bundled secret', () => {
+    // Atomic source rule: the moment .env touches GCP_*, env owns both
+    // halves. The bundled secret is invisible — even if the env clientId
+    // happens to match the bundled clientId, pairing it with a different
+    // project's secret is a silent-mismatch trap we deliberately avoid.
     BUNDLED_GOOGLE_OAUTH.clientId = 'bundled.apps.googleusercontent.com'
     BUNDLED_GOOGLE_OAUTH.clientSecret = 'bundled-secret'
     const path = writeEnv('GCP_CLIENTID=env.apps.googleusercontent.com\n')
     const r = loadAuthSecrets(path)
     expect(r?.gcpClientId).toBe('env.apps.googleusercontent.com')
-    expect(r?.gcpClientSecret).toBe('bundled-secret')
-    expect(r?.source).toBe('mixed')
+    expect(r?.gcpClientSecret).toBeNull()
+    expect(r?.source).toBe('env')
+  })
+
+  it('rejects GCP_CLIENTSECRET set without GCP_CLIENTID (ambiguous)', () => {
+    BUNDLED_GOOGLE_OAUTH.clientId = 'bundled.apps.googleusercontent.com'
+    BUNDLED_GOOGLE_OAUTH.clientSecret = 'bundled-secret'
+    const path = writeEnv('GCP_CLIENTSECRET=lonely-secret\n')
+    const r = loadAuthSecrets(path)
+    expect(r).toBeNull()
   })
 
   it('returns null secret when neither env nor bundled has one (PKCE-only)', () => {
