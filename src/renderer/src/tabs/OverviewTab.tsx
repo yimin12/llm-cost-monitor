@@ -377,25 +377,28 @@ export function OverviewTab({ agg, period, onPeriodChange, settings, teamOvervie
 
       <YieldScoreCard settings={settings} />
 
+      {/* Overview cards are summary tiles — the full ranked lists live on
+          dedicated tabs (Providers / Sessions). Cap to top 3 each so the
+          page stays scannable; a long tail dilutes the headline. */}
       <section className="block">
         <div className="block-head">
-          <h3>By provider · {PERIOD_LABEL[period]}</h3>
+          <h3>Top providers · {PERIOD_LABEL[period]}</h3>
         </div>
-        <ProviderRows rows={providerRows} />
+        <ProviderRows rows={providerRows.slice(0, 3)} />
       </section>
 
       <section className="block">
         <div className="block-head">
           <h3>Top models · today</h3>
         </div>
-        <ModelRows rows={agg.topModelsToday} />
+        <ModelRows rows={agg.topModelsToday.slice(0, 3)} />
       </section>
 
       <section className="block">
         <div className="block-head">
           <h3>Top projects · today</h3>
         </div>
-        <ProjectRows rows={agg.topProjectsToday} />
+        <ProjectRows rows={agg.topProjectsToday.slice(0, 3)} />
       </section>
     </>
   )

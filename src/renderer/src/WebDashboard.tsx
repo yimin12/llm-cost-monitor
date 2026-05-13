@@ -489,7 +489,10 @@ export function WebDashboard(): JSX.Element {
               </div>
             </header>
             <ul className="web-table">
-              {providerRows.map((p) => {
+              {/* Overview is a glance surface — cap the long tail at the
+                  top 3 each so the page stays scannable. Full ranked
+                  lists live on the Providers / Sessions tabs. */}
+              {providerRows.slice(0, 3).map((p) => {
                 const pct = (Number(p.costMicroUsd) / providerTotal) * 100
                 const color = providerColor(p.provider)
                 return (
@@ -514,7 +517,7 @@ export function WebDashboard(): JSX.Element {
               </div>
             </header>
             <ul className="web-table">
-              {agg.topModelsToday.map((m) => {
+              {agg.topModelsToday.slice(0, 3).map((m) => {
                 const pct = (Number(m.costMicroUsd) / modelTotal) * 100
                 const color = providerColor(m.provider)
                 return (
@@ -539,7 +542,7 @@ export function WebDashboard(): JSX.Element {
               </div>
             </header>
             <ul className="web-table">
-              {agg.topProjectsToday.map((p) => {
+              {agg.topProjectsToday.slice(0, 3).map((p) => {
                 const pct = (Number(p.costMicroUsd) / projectTotal) * 100
                 const label = p.project === '(none)' ? 'no project' : p.project
                 return (
