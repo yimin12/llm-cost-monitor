@@ -6,6 +6,11 @@ import type { AuthState } from '@shared/ipc-channels'
 // Window.api typing lives in App.tsx (single source of truth across renderer).
 interface AuthHeaderProps {
   className?: string
+  // When true, AuthHeader returns null for any non-signed-in state — the
+  // Overview's TeamSyncPortal owns the prominent sign-in CTA, so the
+  // chip-in-the-corner version would be redundant. Signed-in state (with
+  // its avatar + Sign-out button) still renders since it's distinct.
+  signInHandledElsewhere?: boolean
 }
 
 // Stable hue per email so the fallback letter avatar is consistent for the
@@ -62,7 +67,10 @@ function Avatar({ user }: { user: AuthUser }): JSX.Element {
   )
 }
 
-export function AuthHeader({ className }: AuthHeaderProps): JSX.Element {
+export function AuthHeader({
+  className,
+  signInHandledElsewhere = false,
+}: AuthHeaderProps): JSX.Element | null {
   const [state, setState] = useState<AuthState>({ kind: 'signed-out' })
   const [busy, setBusy] = useState(false)
 
@@ -90,6 +98,10 @@ export function AuthHeader({ className }: AuthHeaderProps): JSX.Element {
       setBusy(false)
     }
   }, [])
+
+  // Non-signed-in states are handled by the Overview portal when team
+  // sync is configured. Avoid showing two sign-in buttons.
+  if (signInHandledElsewhere && state.kind !== 'signed-in') return null
 
   if (state.kind === 'signed-in') {
     return (

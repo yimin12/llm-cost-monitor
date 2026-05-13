@@ -356,8 +356,16 @@ export function App(): JSX.Element {
         </div>
         {/* AuthHeader sits inline with the brand instead of taking its
             own row — saves vertical real estate. Refresh + quit moved
-            to the always-visible <Footer/> at the bottom of the panel. */}
-        <AuthHeader className="auth-header-inline" />
+            to the always-visible <Footer/> at the bottom of the panel.
+            When team sync is on, the OverviewTab's TeamSyncPortal owns
+            the prominent sign-in CTA, so hide the corner chip variant
+            to avoid duplicate buttons. */}
+        <AuthHeader
+          className="auth-header-inline"
+          signInHandledElsewhere={
+            settings?.teamSync.enabled === true && settings.teamSync.teamId !== null
+          }
+        />
       </header>
 
       <nav className="tab-bar" role="tablist">
