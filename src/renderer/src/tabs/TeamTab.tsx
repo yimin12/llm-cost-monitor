@@ -366,6 +366,11 @@ export function TeamTab({ settings, dashboardUrl }: {
           <ul className="rows">
             {overview.topProjects.slice(0, 3).map((p) => (
               <li key={p.projectKey}>
+                {/* chip slot keeps the row aligned with .rows grid (first
+                    column is the 8px chip; without this placeholder the
+                    label gets squeezed into the chip column and only the
+                    leading char survives the text-overflow: ellipsis). */}
+                <span className="row-chip neutral" />
                 <span className="row-label" title={p.redacted ? 'project name redacted' : p.projectKey}>
                   {p.redacted ? `${p.projectKey.slice(0, 8)}… (redacted)` : p.projectKey}
                 </span>
@@ -405,6 +410,7 @@ export function TeamTab({ settings, dashboardUrl }: {
         <ul className="rows">
           {overview.nodes.slice(0, 3).map((n) => (
             <li key={n.nodeId}>
+              <span className="row-chip neutral" />
               <span className="row-label" title={n.nodeId}>
                 {n.displayName ?? `${n.nodeId.slice(0, 8)}…`}
                 {n.platform !== null && <span className="mono small"> · {n.platform}</span>}
