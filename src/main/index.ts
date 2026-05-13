@@ -446,21 +446,20 @@ void app.whenReady().then(async () => {
     if (syncQueue === null) return
     const cfg = settings.get().teamSync
     if (!cfg.enabled || cfg.teamId === null || cfg.userId === null) return
+    const drainCfg = {
+      enabled: true,
+      teamId: cfg.teamId,
+      userId: cfg.userId,
+      privacyLevel: cfg.privacyLevel,
+      intervalMs: cfg.intervalMs,
+    } as const
     try {
-      const out = await syncQueue.drain({
-        enabled: true,
-        teamId: cfg.teamId,
-        userId: cfg.userId,
-        privacyLevel: cfg.privacyLevel,
-      })
-      const status = await syncQueue.getStatus({
-        enabled: true,
-        teamId: cfg.teamId,
-        userId: cfg.userId,
-        privacyLevel: cfg.privacyLevel,
-      })
+      const out = await syncQueue.drain(drainCfg)
+      const status = await syncQueue.getStatus(drainCfg)
       broadcastSyncStatusChanged(status)
-      if (out.error !== null) {
+      if (out.skipped === 'rate_limited') {
+        // No-op — cadence gate did its job. Don't spam the log.
+      } else if (out.error !== null) {
         console.warn(`sync drain: ${out.error}`)
       } else if (out.uploaded > 0) {
         console.log(
@@ -474,7 +473,9 @@ void app.whenReady().then(async () => {
   }
   // First drain happens shortly after startup; subsequent ones every
   // teamSync.intervalMs. Timer is rebuilt whenever the user changes the
-  // cadence in Settings.
+  // cadence in Settings. The real cadence floor is enforced inside
+  // SyncQueue (drain() returns skipped:'rate_limited' until intervalMs has
+  // elapsed), so this timer firing early is a cheap no-op.
   setTimeout(() => void runSyncDrain(), 10_000)
   const rebuildSyncTimer = (): void => {
     if (syncTimer !== null) clearInterval(syncTimer)

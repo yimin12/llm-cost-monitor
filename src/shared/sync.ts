@@ -25,7 +25,10 @@ export interface TeamSyncSettings {
   serverUrl: string | null
   // Default redaction. Can be overridden server-side by team policy.
   privacyLevel: PrivacyLevel
-  // How often the queue drains. Floor is 30s to keep idle traffic minimal.
+  // Minimum interval between successful uploads. SyncQueue's cadence gate
+  // enforces this; the main-process wake-up tick is a fixed sub-cadence
+  // (currently 5 minutes) so failed→retry recovery doesn't stretch a full
+  // day. Floor is 30s to keep idle traffic minimal.
   intervalMs: number
 }
 
@@ -35,7 +38,10 @@ export const DEFAULT_TEAM_SYNC: TeamSyncSettings = {
   userId: null,
   serverUrl: null,
   privacyLevel: 'redacted',
-  intervalMs: 5 * 60_000,
+  // Default to one upload per day. Users can dial down via the settings
+  // UI; the server-side row-level locking keeps high-frequency uploads
+  // safe too (see test "concurrency B").
+  intervalMs: 24 * 60 * 60 * 1000,
 }
 
 // Per-event payload uploaded to the server. The discriminator is `kind`:
@@ -140,6 +146,11 @@ export interface SyncStatus {
   enabled: boolean
   // Last successful drain (ms epoch, or null on cold start).
   lastSyncAt: number | null
+  // Earliest time the next scheduled drain will actually upload. Equals
+  // lastSyncAt + intervalMs when both are set; null while disabled or
+  // before the first sync. Renderer uses it for "Next sync at HH:MM"
+  // UI hints and to grey out the Sync-Now button only when needed.
+  nextSyncAt: number | null
   // How many local events are still ahead of the cursor.
   pendingCount: number
   // Last error message, if any. Cleared on next success.
