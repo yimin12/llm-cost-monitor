@@ -12,6 +12,9 @@ export interface GoogleProviderDeps {
   pricing: PricingTable
   events: EventRepository
   fileCache: FileCache
+  // Path to the last-known-good plan cache (typically
+  // `<userData>/google-plan-cache.json`). null disables caching.
+  planCachePath?: string | null
 }
 
 export class GoogleProvider implements AIProvider {
@@ -50,7 +53,7 @@ export class GoogleProvider implements AIProvider {
   }
 
   getPlanInfo(): Promise<PlanInfo> {
-    return detectGooglePlan()
+    return detectGooglePlan({ cachePath: this.deps.planCachePath ?? null })
   }
 
   private async refreshImpl(): Promise<UsageSnapshot> {
