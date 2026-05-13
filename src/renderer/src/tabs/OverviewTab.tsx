@@ -277,10 +277,18 @@ export function OverviewTab({ agg, period, onPeriodChange, settings, teamOvervie
   const me = myUserId === null
     ? null
     : (teamOverview?.members.find((m) => m.userId === myUserId) ?? null)
-  const myNodeCount =
+  const myNodes =
     myUserId === null || teamOverview === null
-      ? 0
-      : teamOverview.nodes.filter((n) => n.userId === myUserId).length
+      ? []
+      : teamOverview.nodes.filter((n) => n.userId === myUserId)
+  const myNodeCount = myNodes.length
+  // "Active now" — device touched the server inside the last 24h. Same
+  // rule the server uses for the team activeNodes KPI, scoped to the
+  // signed-in user.
+  const activeWindowMs = Date.now() - 24 * 3600 * 1000
+  const myActiveCount = myNodes.filter(
+    (n) => n.lastSeenAt !== null && n.lastSeenAt >= activeWindowMs,
+  ).length
   const providerRows =
     period === 'today' ? agg.byProviderToday : agg[PERIOD_BY_PROVIDER[period]]
 
@@ -353,39 +361,40 @@ export function OverviewTab({ agg, period, onPeriodChange, settings, teamOvervie
         />
       </section>
 
-      {/* Account total — merged across every machine the user signs into.
-          Polls team-overview every 5 min so a second device (e.g. mac +
-          mbp on the same account) shows up without manual refresh.
-          Window is 30d (server-side default); the local row above tracks
-          the user's chosen period and is per-machine. */}
+      {/* Account total — merged across every machine the user signs
+          into. Polls team-overview every 5 min so a second device (e.g.
+          mac + mbp on the same account) shows up without manual refresh.
+          Three tiles: cost + tokens (the headline numbers) and active
+          devices NOW (so the user knows which machines contributed).
+          Full per-device drilldown lives on the Team tab. */}
       {me !== null && (
-        <section className="kpi-grid kpi-grid-4 hero-tiles" aria-label={`Account total across ${myNodeCount} device${myNodeCount === 1 ? '' : 's'}`}>
+        <section
+          className="kpi-grid kpi-grid-3 hero-tiles"
+          aria-label={`Account total across ${myNodeCount} device${myNodeCount === 1 ? '' : 's'}`}
+        >
           <KpiTile
             icon={IconDollar}
             iconColor="rgba(120, 200, 140, 0.95)"
-            label={`Account · 30d (${myNodeCount} device${myNodeCount === 1 ? '' : 's'})`}
+            label="Account cost"
             value={(() => {
               const usd = Number(me.costMicroUsd) / 1_000_000
               return usd >= 100 ? `$${usd.toFixed(1)}` : `$${usd.toFixed(2)}`
             })()}
-          />
-          <KpiTile
-            icon={IconActivity}
-            iconColor="rgba(120, 170, 255, 0.95)"
-            label="Account calls"
-            value={me.eventCount.toLocaleString()}
+            sub="30d total"
           />
           <KpiTile
             icon={IconTokens}
             iconColor="rgba(167, 139, 250, 0.95)"
             label="Account tokens"
             value={formatTokens(me.inputTokens + me.outputTokens)}
+            sub="30d in + out"
           />
           <KpiTile
             icon={IconNodes}
             iconColor="rgba(160, 200, 255, 0.95)"
-            label="Devices"
-            value={String(myNodeCount)}
+            label="Active now"
+            value={`${myActiveCount}/${myNodeCount}`}
+            sub="24h window"
           />
         </section>
       )}

@@ -977,6 +977,7 @@ body {
   display: grid;
   gap: 8px;
 }
+.kpi-grid-2 { grid-template-columns: repeat(2, 1fr); }
 .kpi-grid-3 { grid-template-columns: repeat(3, 1fr); }
 .kpi-grid-4 { grid-template-columns: repeat(4, 1fr); }
 

@@ -380,40 +380,37 @@ export function WebDashboard(): JSX.Element {
           if (teamOverview === null || myUserId === null) return null
           const me = teamOverview.members.find((m) => m.userId === myUserId)
           if (me === undefined) return null
-          const myNodes = teamOverview.nodes.filter((n) => n.userId === myUserId).length
+          const myNodes = teamOverview.nodes.filter((n) => n.userId === myUserId)
+          const activeWindowMs = Date.now() - 24 * 3600 * 1000
+          const myActiveCount = myNodes.filter(
+            (n) => n.lastSeenAt !== null && n.lastSeenAt >= activeWindowMs,
+          ).length
           const acctUsd = Number(me.costMicroUsd) / 1_000_000
           return (
             <section
-              className="web-kpi-row"
-              aria-label={`Account total across ${myNodes} device${myNodes === 1 ? '' : 's'}`}
+              className="web-kpi-row web-kpi-row-triple"
+              aria-label={`Account total across ${myNodes.length} device${myNodes.length === 1 ? '' : 's'}`}
             >
-              <article className="web-kpi web-kpi-hero">
-                <span className="web-kpi-label">Account · 30d</span>
+              <article className="web-kpi">
+                <span className="web-kpi-label">Account cost</span>
                 <span className="web-kpi-value">
                   {acctUsd >= 100 ? `$${acctUsd.toFixed(1)}` : `$${acctUsd.toFixed(2)}`}
                 </span>
-                <span className="web-kpi-sub">
-                  across {myNodes} device{myNodes === 1 ? '' : 's'} · syncs every 5 min
-                </span>
-              </article>
-              <article className="web-kpi">
-                <span className="web-kpi-label">Account calls</span>
-                <span className="web-kpi-value secondary">{me.eventCount.toLocaleString()}</span>
-                <span className="web-kpi-sub">all devices</span>
+                <span className="web-kpi-sub">30d total</span>
               </article>
               <article className="web-kpi">
                 <span className="web-kpi-label">Account tokens</span>
                 <span className="web-kpi-value secondary">
                   {formatTokens(me.inputTokens + me.outputTokens)}
                 </span>
-                <span className="web-kpi-sub">in + out</span>
+                <span className="web-kpi-sub">30d in + out</span>
               </article>
               <article className="web-kpi">
-                <span className="web-kpi-label">Devices</span>
-                <span className="web-kpi-value secondary">{myNodes}</span>
-                <span className="web-kpi-sub">
-                  {me.lastSeenAt !== null ? `last sync ${timeAgo(me.lastSeenAt)} ago` : 'never synced'}
+                <span className="web-kpi-label">Active now</span>
+                <span className="web-kpi-value secondary">
+                  {myActiveCount}/{myNodes.length}
                 </span>
+                <span className="web-kpi-sub">24h window</span>
               </article>
             </section>
           )
