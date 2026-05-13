@@ -1,8 +1,9 @@
 import type { AddressInfo } from 'node:net'
+import { createHash } from 'node:crypto'
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
-import type { SyncedEventV1 } from '../../src/shared/sync'
+import { syncEventIdInput, type SyncedEventV1 } from '../../src/shared/sync'
 
 import type { Pool } from '../db'
 import { createApp } from '../http'
@@ -11,15 +12,28 @@ import { createServerTestDatabase, dropServerTestDatabase } from './test-helpers
 
 const NOW = Date.now()
 
+// Mirrors team-service.test.ts — the server recomputes this hash and
+// rejects mismatches, so the factory must always emit the canonical id.
+function sid(team: string, user: string, node: string, local: string): string {
+  return createHash('sha256').update(syncEventIdInput(team, user, node, local)).digest('hex')
+}
+
+const DEFAULT_SID = sid('team-A', 'user-1', 'node-1', 'local-1')
+
 function evt(over: Partial<SyncedEventV1> = {}): SyncedEventV1 {
+  const { sync_event_id: _ignored, ...rest } = over
+  const team_id = rest.team_id ?? 'team-A'
+  const user_id = rest.user_id ?? 'user-1'
+  const node_id = rest.node_id ?? 'node-1'
+  const local_event_id = rest.local_event_id ?? 'local-1'
   return {
     kind: 'event',
     event_version: 1,
-    sync_event_id: 'sid-1',
-    team_id: 'team-A',
-    user_id: 'user-1',
-    node_id: 'node-1',
-    local_event_id: 'local-1',
+    sync_event_id: sid(team_id, user_id, node_id, local_event_id),
+    team_id,
+    user_id,
+    node_id,
+    local_event_id,
     payload_hash: 'hash-1',
     privacy_level: 'redacted',
     captured_at: NOW,
@@ -42,7 +56,7 @@ function evt(over: Partial<SyncedEventV1> = {}): SyncedEventV1 {
     latency_ms: null,
     cost_micro_usd: '1500',
     pricing_snapshot_version: 'v1',
-    ...over,
+    ...rest,
   }
 }
 
@@ -80,6 +94,7 @@ describe('HTTP server', () => {
 
   beforeEach(async () => {
     await pool.query('DELETE FROM sync_conflicts')
+    await pool.query('DELETE FROM event_daily_rollup')
     await pool.query('DELETE FROM daily_aggregates')
     await pool.query('DELETE FROM usage_events')
     await pool.query('DELETE FROM nodes')
@@ -120,7 +135,7 @@ describe('HTTP server', () => {
     })
     expect(r.status).toBe(200)
     const body = (await r.json()) as { accepted: string[]; cursor: number }
-    expect(body.accepted).toEqual(['sid-1'])
+    expect(body.accepted).toEqual([DEFAULT_SID])
     expect(body.cursor).toBe(NOW)
   })
 
