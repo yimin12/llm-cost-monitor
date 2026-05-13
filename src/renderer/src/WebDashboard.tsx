@@ -741,7 +741,9 @@ export function WebDashboard(): JSX.Element {
                   <p className="web-empty">no project activity</p>
                 ) : (
                   <ul className="web-team-rows">
-                    {teamOverview.topProjects.map((p) => (
+                    {/* Glance surface — cap each breakdown to top 3; full ranked
+                        lists live behind the audit drilldown (TODO: link). */}
+                    {teamOverview.topProjects.slice(0, 3).map((p) => (
                       <li key={p.projectKey}>
                         <span
                           className="web-team-label"
@@ -764,7 +766,7 @@ export function WebDashboard(): JSX.Element {
               <div className="web-team-block">
                 <h3>By provider · model</h3>
                 <ul className="web-team-rows">
-                  {teamOverview.byProvider.map((p) => (
+                  {teamOverview.byProvider.slice(0, 3).map((p) => (
                     <li key={`${p.provider}|${p.model}`}>
                       <span
                         className="web-team-chip"
@@ -788,7 +790,7 @@ export function WebDashboard(): JSX.Element {
               <div className="web-team-block">
                 <h3>Active nodes</h3>
                 <ul className="web-team-rows">
-                  {teamOverview.nodes.map((n) => (
+                  {teamOverview.nodes.slice(0, 3).map((n) => (
                     <li key={n.nodeId}>
                       <span className="web-team-label" title={n.nodeId}>
                         {n.displayName ?? `${n.nodeId.slice(0, 8)}…`}
