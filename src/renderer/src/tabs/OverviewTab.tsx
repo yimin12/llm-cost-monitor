@@ -5,6 +5,7 @@ import type { AppSettings, TeamOverview, TeamProviderUsage } from '@shared/ipc-c
 
 import { AreaChart, ShareBar, useAnimatedNumber } from '../components/charts'
 import { KpiTile } from '../components/KpiTile'
+import { TeamSyncPortal } from '../components/TeamSyncPortal'
 import { YieldScoreCard } from '../components/YieldScoreCard'
 import { formatTokens, microToUsd, providerColor, providerName } from '../lib/format'
 
@@ -319,6 +320,7 @@ export function OverviewTab({ agg, period, onPeriodChange, settings, teamOvervie
 
   return (
     <>
+      <TeamSyncPortal teamSyncEnabled={teamEnabled} />
       <div className="period-bar" role="tablist">
         {(['today', '7d', '1m', '6m', '1y'] as const).map((k) => (
           <button

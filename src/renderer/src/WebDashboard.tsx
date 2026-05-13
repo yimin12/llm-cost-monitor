@@ -12,6 +12,7 @@ import type {
 
 import { AreaChart, Donut, ShareBar, useAnimatedNumber } from './components/charts'
 import { ProviderCatalog } from './components/ProviderCatalog'
+import { TeamSyncPortal } from './components/TeamSyncPortal'
 import { YieldScoreCard } from './components/YieldScoreCard'
 import {
   formatDuration,
@@ -338,6 +339,12 @@ export function WebDashboard(): JSX.Element {
 
         {tab === 'overview' && (
           <>
+
+        {/* Pre-login portal — shown above the KPIs when team sync is on
+            but the user isn't signed in (or the last sign-in errored). */}
+        <TeamSyncPortal
+          teamSyncEnabled={settings?.teamSync.enabled === true && settings.teamSync.teamId !== null}
+        />
 
         {/* KPI row */}
         <section className="web-kpi-row">
