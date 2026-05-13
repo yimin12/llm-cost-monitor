@@ -135,7 +135,16 @@ export function WebDashboard(): JSX.Element {
       setTeamOverview(null)
       return
     }
-    const periodWindowMs = PERIOD_DAYS[period] * 24 * 60 * 60_000
+    // "today" anchors to UTC midnight (matching agg.today semantics) so
+    // the Account cost tile doesn't inflate with yesterday-evening
+    // calls; other periods are rolling-N-days.
+    const periodWindowMs = period === 'today'
+      ? (() => {
+          const d = new Date()
+          const midnightUtc = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
+          return Math.max(1, Date.now() - midnightUtc)
+        })()
+      : PERIOD_DAYS[period] * 24 * 60 * 60_000
     let cancelled = false
     const tick = async (): Promise<void> => {
       try {
@@ -541,7 +550,7 @@ export function WebDashboard(): JSX.Element {
           </article>
 
           {/* Yield Score (cost per commit) — same component the tray uses. */}
-          <YieldScoreCard settings={settings} />
+          <YieldScoreCard settings={settings} outerPeriod={period} />
         </section>
 
         {/* Three-column data row: providers / models / projects. */}

@@ -250,8 +250,18 @@ export function OverviewTab({ agg, period, onPeriodChange, settings, teamOvervie
   const teamEnabled = teamSync?.enabled === true && teamSync.teamId !== null
   const myUserId = teamSync?.userId ?? null
   // Period → ms window passed to the server so the account row matches
-  // whatever range the user picked above (Today/7d/1m/6m/1y).
-  const periodWindowMs = PERIOD_DAYS[period] * 24 * 60 * 60 * 1000
+  // whatever range the user picked above (Today/7d/1m/6m/1y). For
+  // "today" we anchor to UTC midnight (matching the local Today tile
+  // semantics) — a rolling 24h window would inflate the number with
+  // yesterday-evening calls.
+  const periodWindowMs = (() => {
+    if (period === 'today') {
+      const d = new Date()
+      const midnightUtc = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
+      return Math.max(1, Date.now() - midnightUtc)
+    }
+    return PERIOD_DAYS[period] * 24 * 60 * 60 * 1000
+  })()
   const [teamOverview, setTeamOverview] = useState<TeamOverview | null>(null)
   useEffect(() => {
     if (!teamEnabled) {
@@ -483,7 +493,7 @@ export function OverviewTab({ agg, period, onPeriodChange, settings, teamOvervie
         </section>
       )}
 
-      <YieldScoreCard settings={settings} />
+      <YieldScoreCard settings={settings} outerPeriod={period} />
 
       {/* Overview cards are summary tiles — the full ranked lists live on
           dedicated tabs (Providers / Sessions). Cap to top 3 each so the

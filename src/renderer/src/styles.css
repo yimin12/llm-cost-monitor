@@ -954,6 +954,14 @@ body {
   font-size: 10.5px;
   font-family: inherit;
 }
+.yield-period-tag {
+  color: rgba(var(--fg), 0.55);
+  font-size: 10.5px;
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px dashed rgba(var(--fg), 0.18);
+}
 .yield-card-empty {
   font-size: 11.5px;
   color: rgba(var(--fg), 0.78);
