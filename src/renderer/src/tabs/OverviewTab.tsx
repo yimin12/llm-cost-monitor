@@ -5,7 +5,6 @@ import type { AppSettings, TeamOverview, TeamProviderUsage } from '@shared/ipc-c
 
 import { AreaChart, ShareBar, useAnimatedNumber } from '../components/charts'
 import { KpiTile } from '../components/KpiTile'
-import { TeamSyncPortal } from '../components/TeamSyncPortal'
 import { YieldScoreCard } from '../components/YieldScoreCard'
 import { formatTokens, microToUsd, providerColor, providerName } from '../lib/format'
 
@@ -250,6 +249,9 @@ export function OverviewTab({ agg, period, onPeriodChange, settings, teamOvervie
   const teamSync = settings?.teamSync
   const teamEnabled = teamSync?.enabled === true && teamSync.teamId !== null
   const myUserId = teamSync?.userId ?? null
+  // Period → ms window passed to the server so the account row matches
+  // whatever range the user picked above (Today/7d/1m/6m/1y).
+  const periodWindowMs = PERIOD_DAYS[period] * 24 * 60 * 60 * 1000
   const [teamOverview, setTeamOverview] = useState<TeamOverview | null>(null)
   useEffect(() => {
     if (!teamEnabled) {
@@ -259,7 +261,7 @@ export function OverviewTab({ agg, period, onPeriodChange, settings, teamOvervie
     let cancelled = false
     const tick = async (): Promise<void> => {
       try {
-        const ov = await window.api.syncTeamOverview()
+        const ov = await window.api.syncTeamOverview(periodWindowMs)
         if (!cancelled) setTeamOverview(ov)
       } catch {
         if (!cancelled) setTeamOverview(null)
@@ -271,7 +273,7 @@ export function OverviewTab({ agg, period, onPeriodChange, settings, teamOvervie
       cancelled = true
       window.clearInterval(id)
     }
-  }, [teamEnabled, teamSync?.teamId])
+  }, [teamEnabled, teamSync?.teamId, periodWindowMs])
 
   // Pull out the current user's row + their nodes. Null when team sync
   // is on but the user hasn't synced yet (no member row on the server).
@@ -320,7 +322,6 @@ export function OverviewTab({ agg, period, onPeriodChange, settings, teamOvervie
 
   return (
     <>
-      <TeamSyncPortal teamSyncEnabled={teamEnabled} />
       <div className="period-bar" role="tablist">
         {(['today', '7d', '1m', '6m', '1y'] as const).map((k) => (
           <button
@@ -364,11 +365,11 @@ export function OverviewTab({ agg, period, onPeriodChange, settings, teamOvervie
       </section>
 
       {/* Account total — merged across every machine the user signs
-          into. Polls team-overview every 5 min so a second device (e.g.
-          mac + mbp on the same account) shows up without manual refresh.
-          Three tiles: cost + tokens (the headline numbers) and active
-          devices NOW (so the user knows which machines contributed).
-          Full per-device drilldown lives on the Team tab. */}
+          into, scoped to the same period as the local row above (the
+          server's ?window=<ms> takes the period's day count). Polls
+          team-overview every 5 min so a second device shows up without
+          manual refresh. Three tiles: cost + tokens (the headline
+          numbers) and active devices NOW. */}
       {me !== null && (
         <section
           className="kpi-grid kpi-grid-3 hero-tiles"
@@ -382,14 +383,14 @@ export function OverviewTab({ agg, period, onPeriodChange, settings, teamOvervie
               const usd = Number(me.costMicroUsd) / 1_000_000
               return usd >= 100 ? `$${usd.toFixed(1)}` : `$${usd.toFixed(2)}`
             })()}
-            sub="30d total"
+            sub={`${PERIOD_LABEL[period]} total`}
           />
           <KpiTile
             icon={IconTokens}
             iconColor="rgba(167, 139, 250, 0.95)"
             label="Account tokens"
             value={formatTokens(me.inputTokens + me.outputTokens)}
-            sub="30d in + out"
+            sub={`${PERIOD_LABEL[period]} in + out`}
           />
           <KpiTile
             icon={IconNodes}

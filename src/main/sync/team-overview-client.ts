@@ -6,6 +6,10 @@ export interface FetchTeamOverviewOpts {
   accessToken: string | null
   fetchImpl?: typeof fetch
   timeoutMs?: number
+  // Optional window override — forwards to the server's ?window=<ms>
+  // query param so the dashboard can ask for "last 7 days" instead of
+  // the default 30. Server clamps to safe bounds.
+  windowMs?: number
 }
 
 function startOfLocalDayMs(now: Date = new Date()): number {
@@ -28,9 +32,10 @@ export async function fetchTeamOverview(
   const fetchImpl = opts.fetchImpl ?? fetch
   const base = opts.baseUrl.replace(/\/+$/, '')
   const todayStartMs = startOfLocalDayMs()
+  const windowParam = opts.windowMs !== undefined ? `&window=${opts.windowMs}` : ''
   const url =
     `${base}/v1/teams/${encodeURIComponent(opts.teamId)}/usage` +
-    `?todayStartMs=${todayStartMs}`
+    `?todayStartMs=${todayStartMs}${windowParam}`
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 8_000)
   try {

@@ -122,9 +122,19 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: RouteCtx):
       }
     }
     try {
+      // Optional ?window=<ms> overrides the default 30-day rollup window.
+      // Clamp to [1h, 1y] so a typo can't ask for nanosecond windows or
+      // multi-decade scans.
+      const qs = new URL(url, 'http://host').searchParams
+      const rawWindow = qs.get('window')
+      const parsedWindow = rawWindow !== null ? Number(rawWindow) : NaN
+      const windowMs = Number.isFinite(parsedWindow) && parsedWindow > 0
+        ? Math.min(Math.max(parsedWindow, 60 * 60_000), 365 * 24 * 60 * 60_000)
+        : undefined
       const overview = await ctx.service.getOverview(teamId, {
         requestingUserId: auth.userId,
         ...(clientTodayStartMs !== undefined ? { todayStartMs: clientTodayStartMs } : {}),
+        ...(windowMs !== undefined ? { windowMs } : {}),
       })
       sendJson(res, 200, overview)
     } catch (err) {

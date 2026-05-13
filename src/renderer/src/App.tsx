@@ -61,7 +61,7 @@ declare global {
       onAlertsUpdated: (cb: () => void) => () => void
       syncStatus: () => Promise<SyncStatus | null>
       syncDrain: () => Promise<SyncStatus | null>
-      syncTeamOverview: () => Promise<TeamOverview | null>
+      syncTeamOverview: (windowMs?: number) => Promise<TeamOverview | null>
       onSyncStatusChanged: (cb: (s: SyncStatus | null) => void) => () => void
       teamAddMember: (body: {
         userId: string
@@ -356,16 +356,8 @@ export function App(): JSX.Element {
         </div>
         {/* AuthHeader sits inline with the brand instead of taking its
             own row — saves vertical real estate. Refresh + quit moved
-            to the always-visible <Footer/> at the bottom of the panel.
-            When team sync is on, the OverviewTab's TeamSyncPortal owns
-            the prominent sign-in CTA, so hide the corner chip variant
-            to avoid duplicate buttons. */}
-        <AuthHeader
-          className="auth-header-inline"
-          signInHandledElsewhere={
-            settings?.teamSync.enabled === true && settings.teamSync.teamId !== null
-          }
-        />
+            to the always-visible <Footer/> at the bottom of the panel. */}
+        <AuthHeader className="auth-header-inline" />
       </header>
 
       <nav className="tab-bar" role="tablist">

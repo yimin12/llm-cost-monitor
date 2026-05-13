@@ -12,7 +12,6 @@ import type {
 
 import { AreaChart, Donut, ShareBar, useAnimatedNumber } from './components/charts'
 import { ProviderCatalog } from './components/ProviderCatalog'
-import { TeamSyncPortal } from './components/TeamSyncPortal'
 import { YieldScoreCard } from './components/YieldScoreCard'
 import {
   formatDuration,
@@ -113,18 +112,9 @@ export function WebDashboard(): JSX.Element {
     setSettings(st)
     setAlertSummary(summary)
     setOpenAlerts(open)
-    // Team sync overview is best-effort: fetch if configured, swallow
-    // errors, leave the section hidden when null. Don't block the rest
-    // of the dashboard on a slow/unreachable team backend.
-    if (st.teamSync.enabled && st.teamSync.teamId !== null) {
-      try {
-        setTeamOverview(await window.api.syncTeamOverview())
-      } catch {
-        setTeamOverview(null)
-      }
-    } else {
-      setTeamOverview(null)
-    }
+    // teamOverview fetched by its own period-aware effect below — keeps
+    // the per-period ?window=<ms> override flowing without baking the
+    // period dependency into this generic reload.
   }, [])
 
   const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -136,23 +126,32 @@ export function WebDashboard(): JSX.Element {
     }, 250)
   }, [reload])
 
-  // Refresh team-overview every 5 minutes so the account-aggregated KPI
-  // row reflects what *other* devices have pushed up since the last
-  // local reload(). Local reload() already updates it on its own
-  // schedule (usage-updated events); this is the cross-device tick.
+  // Fetch (and re-poll every 5 min) the team-overview keyed to the
+  // currently-selected period, so the Account row matches the local
+  // row above. Re-fires on period change so switching today → 1y
+  // re-asks the server for the right window. Hidden when sync is off.
   useEffect(() => {
-    if (settings?.teamSync.enabled !== true || settings.teamSync.teamId === null) return
-    const id = window.setInterval(() => {
-      void (async () => {
-        try {
-          setTeamOverview(await window.api.syncTeamOverview())
-        } catch {
-          /* leave stale value on transient failure */
-        }
-      })()
-    }, 5 * 60_000)
-    return () => window.clearInterval(id)
-  }, [settings?.teamSync.enabled, settings?.teamSync.teamId])
+    if (settings?.teamSync.enabled !== true || settings.teamSync.teamId === null) {
+      setTeamOverview(null)
+      return
+    }
+    const periodWindowMs = PERIOD_DAYS[period] * 24 * 60 * 60_000
+    let cancelled = false
+    const tick = async (): Promise<void> => {
+      try {
+        const ov = await window.api.syncTeamOverview(periodWindowMs)
+        if (!cancelled) setTeamOverview(ov)
+      } catch {
+        /* leave stale value on transient failure */
+      }
+    }
+    void tick()
+    const id = window.setInterval(() => void tick(), 5 * 60_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [settings?.teamSync.enabled, settings?.teamSync.teamId, period])
 
   useEffect(() => {
     void window.api.pricingInfo().then(setPricing)
@@ -340,12 +339,6 @@ export function WebDashboard(): JSX.Element {
         {tab === 'overview' && (
           <>
 
-        {/* Pre-login portal — shown above the KPIs when team sync is on
-            but the user isn't signed in (or the last sign-in errored). */}
-        <TeamSyncPortal
-          teamSyncEnabled={settings?.teamSync.enabled === true && settings.teamSync.teamId !== null}
-        />
-
         {/* KPI row */}
         <section className="web-kpi-row">
           <article className="web-kpi web-kpi-hero">
@@ -403,14 +396,14 @@ export function WebDashboard(): JSX.Element {
                 <span className="web-kpi-value">
                   {acctUsd >= 100 ? `$${acctUsd.toFixed(1)}` : `$${acctUsd.toFixed(2)}`}
                 </span>
-                <span className="web-kpi-sub">30d total</span>
+                <span className="web-kpi-sub">{PERIOD_LABEL[period]} total</span>
               </article>
               <article className="web-kpi">
                 <span className="web-kpi-label">Account tokens</span>
                 <span className="web-kpi-value secondary">
                   {formatTokens(me.inputTokens + me.outputTokens)}
                 </span>
-                <span className="web-kpi-sub">30d in + out</span>
+                <span className="web-kpi-sub">{PERIOD_LABEL[period]} in + out</span>
               </article>
               <article className="web-kpi">
                 <span className="web-kpi-label">Active now</span>

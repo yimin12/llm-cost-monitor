@@ -350,7 +350,10 @@ export function installBrowserStub(): void {
       lastError: null,
       nodeId: 'demo-node-id',
     }),
-    syncTeamOverview: async () => getReal<TeamOverview | null>('/v1/team-overview'),
+    syncTeamOverview: async (windowMs?: number) => {
+      const qs = windowMs !== undefined ? `?window=${windowMs}` : ''
+      return getReal<TeamOverview | null>(`/v1/team-overview${qs}`)
+    },
     onSyncStatusChanged: () => () => {},
     teamAddMember: async () => ({ ok: false, status: 0, error: 'browser_stub' }),
     teamRevokeMember: async () => ({ ok: false, status: 0, error: 'browser_stub' }),
