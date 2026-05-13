@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react'
+
 import type { AggregateSnapshot, CostByModel, CostByProject, CostByProvider, MonthlyForecast } from '@shared/aggregates'
 import type { AppSettings, TeamOverview, TeamProviderUsage } from '@shared/ipc-channels'
 
@@ -136,6 +138,23 @@ const IconProviders = (
     <path d="M8.5 7.5L11 16M15.5 7.5L13 16" />
   </svg>
 )
+// Laptop / device icon for the per-account "nodes" KPI — used on the
+// team-aggregated row to communicate "this number is across machines".
+const IconNodes = (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <rect x="3" y="4" width="18" height="12" rx="2" />
+    <path d="M2 20h20" />
+  </svg>
+)
+
+// Poll cadence for the team-aggregated KPI row. The local-machine KPIs
+// repaint on every aggregate refresh tick (~30s, driven by the sampler);
+// the team aggregate comes from the server's team-overview endpoint and
+// changes only when *other* nodes drain to it, so we don't need it
+// every 30s. 5 min keeps the cross-device totals fresh-feeling without
+// hammering the server.
+const TEAM_KPI_POLL_MS = 5 * 60 * 1000
 
 const PERIOD_LABEL: Record<Period, string> = {
   today: 'Today',
@@ -222,6 +241,46 @@ export function OverviewTab({ agg, period, onPeriodChange, settings, teamOvervie
   teamOverview: TeamOverview | null
 }): JSX.Element {
   const range = agg[PERIOD_RANGE[period]]
+
+  // Team-aggregated KPI row — sums the signed-in user's events across
+  // every machine they've registered. Polls the server every 5 min so
+  // numbers from a second device (e.g. a remote mac) flow in without
+  // requiring a manual refresh. Hidden when team sync isn't configured.
+  const teamSync = settings?.teamSync
+  const teamEnabled = teamSync?.enabled === true && teamSync.teamId !== null
+  const myUserId = teamSync?.userId ?? null
+  const [teamOverview, setTeamOverview] = useState<TeamOverview | null>(null)
+  useEffect(() => {
+    if (!teamEnabled) {
+      setTeamOverview(null)
+      return
+    }
+    let cancelled = false
+    const tick = async (): Promise<void> => {
+      try {
+        const ov = await window.api.syncTeamOverview()
+        if (!cancelled) setTeamOverview(ov)
+      } catch {
+        if (!cancelled) setTeamOverview(null)
+      }
+    }
+    void tick()
+    const id = window.setInterval(() => void tick(), TEAM_KPI_POLL_MS)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [teamEnabled, teamSync?.teamId])
+
+  // Pull out the current user's row + their nodes. Null when team sync
+  // is on but the user hasn't synced yet (no member row on the server).
+  const me = myUserId === null
+    ? null
+    : (teamOverview?.members.find((m) => m.userId === myUserId) ?? null)
+  const myNodeCount =
+    myUserId === null || teamOverview === null
+      ? 0
+      : teamOverview.nodes.filter((n) => n.userId === myUserId).length
   const providerRows =
     period === 'today' ? agg.byProviderToday : agg[PERIOD_BY_PROVIDER[period]]
 
@@ -293,6 +352,43 @@ export function OverviewTab({ agg, period, onPeriodChange, settings, teamOvervie
           value={String(donutSlices.length)}
         />
       </section>
+
+      {/* Account total — merged across every machine the user signs into.
+          Polls team-overview every 5 min so a second device (e.g. mac +
+          mbp on the same account) shows up without manual refresh.
+          Window is 30d (server-side default); the local row above tracks
+          the user's chosen period and is per-machine. */}
+      {me !== null && (
+        <section className="kpi-grid kpi-grid-4 hero-tiles" aria-label={`Account total across ${myNodeCount} device${myNodeCount === 1 ? '' : 's'}`}>
+          <KpiTile
+            icon={IconDollar}
+            iconColor="rgba(120, 200, 140, 0.95)"
+            label={`Account · 30d (${myNodeCount} device${myNodeCount === 1 ? '' : 's'})`}
+            value={(() => {
+              const usd = Number(me.costMicroUsd) / 1_000_000
+              return usd >= 100 ? `$${usd.toFixed(1)}` : `$${usd.toFixed(2)}`
+            })()}
+          />
+          <KpiTile
+            icon={IconActivity}
+            iconColor="rgba(120, 170, 255, 0.95)"
+            label="Account calls"
+            value={me.eventCount.toLocaleString()}
+          />
+          <KpiTile
+            icon={IconTokens}
+            iconColor="rgba(167, 139, 250, 0.95)"
+            label="Account tokens"
+            value={formatTokens(me.inputTokens + me.outputTokens)}
+          />
+          <KpiTile
+            icon={IconNodes}
+            iconColor="rgba(160, 200, 255, 0.95)"
+            label="Devices"
+            value={String(myNodeCount)}
+          />
+        </section>
+      )}
 
       {(() => {
         const days = PERIOD_DAYS[period]

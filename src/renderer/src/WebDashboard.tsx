@@ -135,6 +135,24 @@ export function WebDashboard(): JSX.Element {
     }, 250)
   }, [reload])
 
+  // Refresh team-overview every 5 minutes so the account-aggregated KPI
+  // row reflects what *other* devices have pushed up since the last
+  // local reload(). Local reload() already updates it on its own
+  // schedule (usage-updated events); this is the cross-device tick.
+  useEffect(() => {
+    if (settings?.teamSync.enabled !== true || settings.teamSync.teamId === null) return
+    const id = window.setInterval(() => {
+      void (async () => {
+        try {
+          setTeamOverview(await window.api.syncTeamOverview())
+        } catch {
+          /* leave stale value on transient failure */
+        }
+      })()
+    }, 5 * 60_000)
+    return () => window.clearInterval(id)
+  }, [settings?.teamSync.enabled, settings?.teamSync.teamId])
+
   useEffect(() => {
     void window.api.pricingInfo().then(setPricing)
     void window.api.settings().then(setSettings)
@@ -350,6 +368,56 @@ export function WebDashboard(): JSX.Element {
             </span>
           </article>
         </section>
+
+        {/* Account total — sums every device the signed-in user has
+            registered on this team. Polls team-overview every 5 min via
+            the effect above so a second machine (e.g. mac + mbp on the
+            same account) shows up here without manual refresh. Window
+            is the server's 30d default; the per-machine KPIs above
+            follow the user's selected period. */}
+        {(() => {
+          const myUserId = settings?.teamSync.userId ?? null
+          if (teamOverview === null || myUserId === null) return null
+          const me = teamOverview.members.find((m) => m.userId === myUserId)
+          if (me === undefined) return null
+          const myNodes = teamOverview.nodes.filter((n) => n.userId === myUserId).length
+          const acctUsd = Number(me.costMicroUsd) / 1_000_000
+          return (
+            <section
+              className="web-kpi-row"
+              aria-label={`Account total across ${myNodes} device${myNodes === 1 ? '' : 's'}`}
+            >
+              <article className="web-kpi web-kpi-hero">
+                <span className="web-kpi-label">Account · 30d</span>
+                <span className="web-kpi-value">
+                  {acctUsd >= 100 ? `$${acctUsd.toFixed(1)}` : `$${acctUsd.toFixed(2)}`}
+                </span>
+                <span className="web-kpi-sub">
+                  across {myNodes} device{myNodes === 1 ? '' : 's'} · syncs every 5 min
+                </span>
+              </article>
+              <article className="web-kpi">
+                <span className="web-kpi-label">Account calls</span>
+                <span className="web-kpi-value secondary">{me.eventCount.toLocaleString()}</span>
+                <span className="web-kpi-sub">all devices</span>
+              </article>
+              <article className="web-kpi">
+                <span className="web-kpi-label">Account tokens</span>
+                <span className="web-kpi-value secondary">
+                  {formatTokens(me.inputTokens + me.outputTokens)}
+                </span>
+                <span className="web-kpi-sub">in + out</span>
+              </article>
+              <article className="web-kpi">
+                <span className="web-kpi-label">Devices</span>
+                <span className="web-kpi-value secondary">{myNodes}</span>
+                <span className="web-kpi-sub">
+                  {me.lastSeenAt !== null ? `last sync ${timeAgo(me.lastSeenAt)} ago` : 'never synced'}
+                </span>
+              </article>
+            </section>
+          )
+        })()}
 
         {/* Daily spend trend. Provider share donut + Top providers/
             models/projects tables + Recent sessions used to live here;
