@@ -1,0 +1,105 @@
+name: CI
+
+# Gate every PR + every push to main on the three checks the project
+# can actually break with a code change: TypeScript typecheck, ESLint,
+# and the vitest suite (unit + integration + cross-machine e2e). All
+# three must pass to land — set "Require status checks to pass before
+# merging" on the branch protection rule in the GitHub UI.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Cancel an in-flight run when a new commit lands on the same PR/branch.
+# Saves runner minutes on rapid pushes; the latest commit is the only
+# one that matters for the gate.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    name: typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - name: install deps
+        # --ignore-scripts skips better-sqlite3's native postinstall —
+        # typecheck doesn't run code, so we don't need the .node binary.
+        # ~30s faster than a full install.
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: tsc (node + web + server)
+        run: npm run typecheck
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - name: install deps
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: eslint
+        run: npm run lint
+
+  test:
+    name: test (vitest + postgres)
+    runs-on: ubuntu-latest
+    # Mirrors docker-compose.yml: postgres 17 on port 5433, user/pass
+    # lcm/lcm_dev, default DB llm_cost_monitor. Test helpers connect
+    # to MAINTENANCE_DSN via these creds and create per-test databases.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: lcm
+          POSTGRES_PASSWORD: lcm_dev
+          POSTGRES_DB: llm_cost_monitor
+        ports:
+          - 5433:5432
+        # Healthcheck ensures the service is ready before `npm test`
+        # races into createTestDatabase().
+        options: >-
+          --health-cmd "pg_isready -U lcm -d llm_cost_monitor"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - name: install deps
+        # Full install — vitest runs real code that may transitively
+        # touch the better-sqlite3 binding (lazy-loaded by Cursor's
+        # credential reader, harmless to compile here).
+        run: npm ci --no-audit --no-fund
+      - name: create lcm_team_sync database
+        # Server-side tests (server/__tests__/) use a separate database
+        # alongside the desktop one. db-init/01-create-team-sync-db.sql
+        # is normally run by the postgres container's initdb hook, but
+        # GitHub's `services:` doesn't honor /docker-entrypoint-initdb.d
+        # mounts — recreate it via psql instead.
+        env:
+          PGPASSWORD: lcm_dev
+        run: |
+          psql -h 127.0.0.1 -p 5433 -U lcm -d llm_cost_monitor \
+            -c "SELECT 1 FROM pg_database WHERE datname = 'lcm_team_sync'" \
+            | grep -q 1 || \
+          psql -h 127.0.0.1 -p 5433 -U lcm -d llm_cost_monitor \
+            -c "CREATE DATABASE lcm_team_sync"
+      - name: vitest run
+        # The vitest config picks up all */__tests__/*.test.ts files;
+        # this single command covers redaction, sync-queue, http,
+        # team-service, e2e-acceptance, and every other suite.
+        run: npm test
