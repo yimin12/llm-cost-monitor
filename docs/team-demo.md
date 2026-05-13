@@ -1,8 +1,89 @@
-# Team features — mock-data walkthrough
+# Team features — onboarding + mock-data walkthrough
 
-A reproducible end-to-end demo of the multi-node merge feature with a
-populated team, an active member, a revoked member, and the device-limit
-trigger.
+Two scripts cover the two common needs around team sync:
+
+| Script | Purpose |
+|---|---|
+| [`Scripts/team-setup.py`](../Scripts/team-setup.py) | **Friendly first-time setup** — walks a new node through reachability → identity → team join/create → settings.json write. ✓/✗ at every step. |
+| [`Scripts/seed-mock-team.py`](../Scripts/seed-mock-team.py) | **Mock data + scenario probes** — populates a team with 5 mock users and exercises revoke + device-limit invariants. Has a `--cleanup` flag. |
+
+## A. First-time setup (real users)
+
+```bash
+# Interactive — prompts for team_id (defaults to team-acme) and uses the
+# Electron app's currently signed-in user when available.
+Scripts/team-setup.py
+
+# Or one-shot for a known user + team:
+Scripts/team-setup.py \
+  --team my-team \
+  --user 105375377941393769884 \
+  --display "Yimin Huang"
+
+# CI / non-interactive (errors instead of prompting):
+Scripts/team-setup.py --non-interactive --team my-team --user my-uid
+```
+
+Output looks like:
+
+```
+Team sync setup
+───────────────
+
+▸ Step 1/4 — Server reachable?
+  ✓ server at http://127.0.0.1:4017 is healthy
+
+▸ Step 2/4 — Who are you?
+  ✓ detected signed-in user: yimin huang
+
+▸ Step 3/4 — Pick (or create) a team
+  ✓ team 'team-acme' is new — creating it; you become the first admin
+  ✓ membership: (team-acme, 105…884, role=admin, status=active)
+
+▸ Step 4/4 — Write local settings.json
+  ✓ wrote /Users/yimin/Library/Application Support/llm-cost-monitor/settings.json
+  ✓    teamSync.enabled = true
+  ✓    teamSync.teamId  = team-acme
+  ✓    teamSync.serverUrl = http://127.0.0.1:4017
+
+Setup complete.
+```
+
+It's idempotent: re-running on a configured node is a no-op except for refreshing the `display_name`.
+
+## B. Mock team for demo / manual exercise
+
+`Scripts/seed-mock-team.py` populates `team-acme` with 5 mock users
+(Carol/Dave/Eve/Fred/Grace) plus a Henry account that's used to trigger
+the device-limit overflow. Idempotent — re-running won't double-count
+(server's `sync_event_id` PK dedup). Produces output like:
+
+```
+[step 1/3] events uploaded=15  duplicates=0
+
+[step 2/3] revoke-then-upload scenario
+  ✓ eve's post-revoke upload rejected:
+    reason: membership is revoked
+  ✓ Eve re-activated for next run
+
+[step 3/3] device-limit overflow scenario (cap = 5 per user)
+  ✓ device #1 accepted
+  ✓ device #2 accepted
+  ✓ device #3 accepted
+  ✓ device #4 accepted
+  ✓ device #5 accepted
+  ✗ device #6 rejected: device_limit_exceeded — max 5 devices per user
+  ✗ device #7 rejected: device_limit_exceeded — max 5 devices per user
+  ✓ summary: 5 accepted / 2 rejected (expected 5/2)
+```
+
+Wipe the mock data when you're done (idempotent — keeps the real users):
+
+```bash
+Scripts/seed-mock-team.py --cleanup
+```
+
+The script exercises every server-side invariant the design relies on:
 
 ## Prerequisites
 
@@ -85,20 +166,11 @@ lands on the team view.
 
 ## Cleanup
 
-Mock data lives only in the `lcm_team_sync` Postgres database — wipe the
-relevant rows when you're done:
-
-```sql
-DELETE FROM event_daily_rollup WHERE user_id IN
-  ('carol@example.com','dave@example.com','eve@example.com',
-   'fred@example.com','grace@example.com','henry@example.com');
-DELETE FROM usage_events WHERE user_id IN
-  ('carol@example.com','dave@example.com','eve@example.com',
-   'fred@example.com','grace@example.com','henry@example.com');
-DELETE FROM nodes WHERE user_id IN
-  ('carol@example.com','dave@example.com','eve@example.com',
-   'fred@example.com','grace@example.com','henry@example.com');
-DELETE FROM team_members WHERE user_id IN
-  ('carol@example.com','dave@example.com','eve@example.com',
-   'fred@example.com','grace@example.com','henry@example.com');
+```bash
+Scripts/seed-mock-team.py --cleanup
 ```
+
+Removes the 6 mock users (`carol`/`dave`/`eve`/`fred`/`grace`/`henry`)
+and every row keyed off them — `team_members`, `nodes`, `usage_events`,
+`event_daily_rollup`. `team-acme` itself and any real members are
+preserved.

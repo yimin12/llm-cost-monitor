@@ -102,11 +102,30 @@ def upload(base: str, user: str, node: str, local: str, provider: str, model: st
         return json.loads(r.read())
 
 
+MOCK_USER_IDS = [u for (u, *_) in MOCK_USERS] + ["henry@example.com"]
+
+
+def cleanup() -> None:
+    user_list = ",".join(f"'{u}'" for u in MOCK_USER_IDS)
+    psql(f"DELETE FROM event_daily_rollup WHERE user_id IN ({user_list})")
+    psql(f"DELETE FROM usage_events       WHERE user_id IN ({user_list})")
+    psql(f"DELETE FROM nodes              WHERE user_id IN ({user_list})")
+    psql(f"DELETE FROM team_members       WHERE user_id IN ({user_list})")
+    print(f"cleaned: removed mock users {', '.join(MOCK_USER_IDS)}")
+    print("(team-acme itself is preserved — your real team membership stays intact)")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--base", default="http://127.0.0.1:4017",
                     help="team-sync server URL (default: %(default)s)")
+    ap.add_argument("--cleanup", action="store_true",
+                    help="remove the mock users + their events/nodes/rollups and exit")
     a = ap.parse_args()
+
+    if a.cleanup:
+        cleanup()
+        return 0
 
     # 1. Make sure team-acme exists.
     psql(f"INSERT INTO teams (id, name, created_at, privacy_floor) "
