@@ -682,6 +682,51 @@ export class TeamService {
       [teamId, BigInt(todaySince)],
     )
 
+    // Per-user month-to-date — from the 1st of the current calendar month
+    // (UTC) to now, scoped to the requesting user across all their synced
+    // nodes. Drives the Overview tab's month-end forecast when team sync
+    // is on so the projection sees account-wide spend instead of just one
+    // Mac. Uses v_merged_daily so it stays off raw events for the (potentially
+    // 31-day-wide) window. Only computed when the caller has a userId —
+    // otherwise the field stays null and the renderer falls back to local.
+    const monthStartDate = new Date(now)
+    monthStartDate.setUTCDate(1)
+    monthStartDate.setUTCHours(0, 0, 0, 0)
+    const monthSinceDate = monthStartDate.toISOString().slice(0, 10)
+    let currentUserMonthCostMicroUsd: string | null = null
+    let currentUserMonthByProvider: TeamProviderUsage[] = []
+    if (opts.requestingUserId !== undefined && opts.requestingUserId.length > 0) {
+      const monthTotalRow = await this.pool.query<{ cost: bigint }>(
+        `SELECT COALESCE(SUM(cost_micro_usd), 0)::bigint AS cost
+         FROM v_merged_daily
+         WHERE team_id = $1 AND user_id = $2 AND date >= $3`,
+        [teamId, opts.requestingUserId, monthSinceDate],
+      )
+      currentUserMonthCostMicroUsd = (monthTotalRow.rows[0]?.cost ?? 0n).toString()
+
+      const monthProvRows = await this.pool.query<{
+        provider: string
+        model: string
+        cost: bigint
+        event_count: bigint
+      }>(
+        `SELECT provider, model,
+                COALESCE(SUM(cost_micro_usd), 0)::bigint AS cost,
+                COALESCE(SUM(event_count), 0)::bigint AS event_count
+         FROM v_merged_daily
+         WHERE team_id = $1 AND user_id = $2 AND date >= $3
+         GROUP BY provider, model
+         ORDER BY cost DESC`,
+        [teamId, opts.requestingUserId, monthSinceDate],
+      )
+      currentUserMonthByProvider = monthProvRows.rows.map((r) => ({
+        provider: r.provider,
+        model: r.model,
+        costMicroUsd: r.cost.toString(),
+        eventCount: Number(r.event_count),
+      }))
+    }
+
     const teamMeta = await this.getTeamMeta(teamId)
 
     // Active node = seen in the last 24h. Cheap, deterministic, and
@@ -705,6 +750,8 @@ export class TeamService {
       totalEventCount: Number(totalRow.rows[0]?.event_count ?? 0n),
       activeMembers,
       activeNodes,
+      currentUserMonthCostMicroUsd,
+      currentUserMonthByProvider,
       members,
       topProjects,
       byProvider,

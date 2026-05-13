@@ -1,5 +1,5 @@
-import type { AggregateSnapshot, CostByModel, CostByProject, CostByProvider } from '@shared/aggregates'
-import type { AppSettings } from '@shared/ipc-channels'
+import type { AggregateSnapshot, CostByModel, CostByProject, CostByProvider, MonthlyForecast } from '@shared/aggregates'
+import type { AppSettings, TeamOverview, TeamProviderUsage } from '@shared/ipc-channels'
 
 import { AreaChart, ShareBar, useAnimatedNumber } from '../components/charts'
 import { KpiTile } from '../components/KpiTile'
@@ -145,11 +145,81 @@ const PERIOD_LABEL: Record<Period, string> = {
   '1y': '1y',
 }
 
-export function OverviewTab({ agg, period, onPeriodChange, settings }: {
+// Replace the local forecast's MTD spend with the user's team-wide MTD
+// (from the team server) when team sync is on. The linear projection
+// (×daysInMonth ÷ daysElapsed) stays client-side so the math is identical
+// to the local code path. Per-provider forecasts get the same swap from
+// `currentUserMonthByProvider`, with cost-keyed aggregation across the
+// per-model tuples that endpoint returns. Returns `null` to signal "use
+// the local forecast unchanged" — keeps the call site declarative.
+function teamScopedForecast(
+  local: AggregateSnapshot,
+  team: TeamOverview | null,
+  settings: AppSettings | null,
+): {
+  forecast: MonthlyForecast | null
+  forecastByProvider: Record<string, MonthlyForecast>
+  source: 'team' | 'local'
+} {
+  if (
+    settings?.teamSync?.enabled !== true ||
+    team === null ||
+    team.currentUserMonthCostMicroUsd === null ||
+    local.forecast === null
+  ) {
+    return {
+      forecast: local.forecast,
+      forecastByProvider: local.forecastByProvider,
+      source: 'local',
+    }
+  }
+  const base = local.forecast
+  const spent = BigInt(team.currentUserMonthCostMicroUsd)
+  // Same linear formula the local aggregator uses (see
+  // src/main/aggregation/aggregator.ts forecast section).
+  const estimate =
+    base.daysElapsed > 0
+      ? (spent * BigInt(base.daysInMonth)) / BigInt(base.daysElapsed)
+      : spent
+  const forecast: MonthlyForecast = {
+    monthStartMs: base.monthStartMs,
+    daysElapsed: base.daysElapsed,
+    daysInMonth: base.daysInMonth,
+    spentMicroUsd: spent,
+    estimateMicroUsd: estimate,
+    confidenceBandMicroUsd: base.confidenceBandMicroUsd,
+  }
+
+  // Roll the per-(provider, model) MTD rows up into per-provider buckets
+  // and project. Models with no entry stay out of the breakdown — we don't
+  // synthesize empty rows.
+  const byProvider: Record<string, MonthlyForecast> = {}
+  for (const row of team.currentUserMonthByProvider as TeamProviderUsage[]) {
+    const cur = byProvider[row.provider]?.spentMicroUsd ?? 0n
+    const spentP = cur + BigInt(row.costMicroUsd)
+    const estP =
+      base.daysElapsed > 0
+        ? (spentP * BigInt(base.daysInMonth)) / BigInt(base.daysElapsed)
+        : spentP
+    byProvider[row.provider] = {
+      monthStartMs: base.monthStartMs,
+      daysElapsed: base.daysElapsed,
+      daysInMonth: base.daysInMonth,
+      spentMicroUsd: spentP,
+      estimateMicroUsd: estP,
+      confidenceBandMicroUsd: 0n,
+    }
+  }
+
+  return { forecast, forecastByProvider: byProvider, source: 'team' }
+}
+
+export function OverviewTab({ agg, period, onPeriodChange, settings, teamOverview }: {
   agg: AggregateSnapshot
   period: Period
   onPeriodChange: (p: Period) => void
   settings: AppSettings | null
+  teamOverview: TeamOverview | null
 }): JSX.Element {
   const range = agg[PERIOD_RANGE[period]]
   const providerRows =
@@ -161,11 +231,15 @@ export function OverviewTab({ agg, period, onPeriodChange, settings }: {
 
   const tokens = range.inputTokens + range.outputTokens
 
-  const forecastPct = agg.forecast
+  const scoped = teamScopedForecast(agg, teamOverview, settings)
+  const forecast = scoped.forecast
+  const forecastByProvider = scoped.forecastByProvider
+
+  const forecastPct = forecast
     ? Math.min(
         100,
-        (Number(agg.forecast.spentMicroUsd) /
-          Math.max(1, Number(agg.forecast.estimateMicroUsd))) *
+        (Number(forecast.spentMicroUsd) /
+          Math.max(1, Number(forecast.estimateMicroUsd))) *
           100,
       )
     : 0
@@ -241,31 +315,38 @@ export function OverviewTab({ agg, period, onPeriodChange, settings }: {
         )
       })()}
 
-      {agg.forecast !== null ? (
+      {forecast !== null ? (
         <section className="forecast-card">
           <div className="forecast-card-head">
-            <span className="chart-card-title">Month-end forecast · total</span>
+            <span className="chart-card-title">
+              Month-end forecast · total
+              {scoped.source === 'team' && (
+                <span className="forecast-source-tag" title="Aggregated across your synced nodes via team sync">
+                  {' '}· account-wide
+                </span>
+              )}
+            </span>
             <span className="forecast-pct">{forecastPct.toFixed(0)}%</span>
           </div>
           <div className="forecast-bar" aria-hidden>
             <div className="forecast-bar-fill" style={{ width: `${forecastPct}%` }} />
           </div>
           <div className="forecast-meta">
-            <span><strong>{microToUsd(agg.forecast.spentMicroUsd)}</strong> spent</span>
-            <span className="forecast-mid">day {agg.forecast.daysElapsed} / {agg.forecast.daysInMonth}</span>
-            <span>~<strong>{microToUsd(agg.forecast.estimateMicroUsd)}</strong> est.</span>
+            <span><strong>{microToUsd(forecast.spentMicroUsd)}</strong> spent</span>
+            <span className="forecast-mid">day {forecast.daysElapsed} / {forecast.daysInMonth}</span>
+            <span>~<strong>{microToUsd(forecast.estimateMicroUsd)}</strong> est.</span>
           </div>
 
-          {Object.keys(agg.forecastByProvider).length > 0 && (
+          {Object.keys(forecastByProvider).length > 0 && (
             <ul className="forecast-by-provider">
-              {Object.entries(agg.forecastByProvider)
+              {Object.entries(forecastByProvider)
                 .sort((a, b) =>
                   Number(b[1].estimateMicroUsd) - Number(a[1].estimateMicroUsd),
                 )
                 .map(([provider, f]) => {
                   const color = providerColor(provider)
                   const est = Number(f.estimateMicroUsd)
-                  const totalEst = Math.max(1, Number(agg.forecast?.estimateMicroUsd ?? 1n))
+                  const totalEst = Math.max(1, Number(forecast.estimateMicroUsd))
                   const sharePct = (est / totalEst) * 100
                   const spentPct = est > 0 ? (Number(f.spentMicroUsd) / est) * 100 : 0
                   return (
