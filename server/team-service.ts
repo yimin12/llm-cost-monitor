@@ -525,7 +525,15 @@ export class TeamService {
   // and supported by usage_events_team_ts_idx.
   async getOverview(
     teamId: string,
-    opts: { requestingUserId?: string; windowMs?: number } = {},
+    opts: {
+      requestingUserId?: string
+      windowMs?: number
+      // Client's local midnight in millis. When provided, replaces the
+      // server's UTC-midnight boundary for "today" — a US user past their
+      // local midnight then sees `todayCostMicroUsd` reset alongside
+      // their local KPI tile instead of trailing it by several hours.
+      todayStartMs?: number
+    } = {},
   ): Promise<TeamOverview> {
     const windowMs = opts.windowMs ?? 30 * 24 * 3600_000
     const now = Date.now()
@@ -536,12 +544,17 @@ export class TeamService {
     // by a few hours of partial-day data on the trailing edge.
     const sinceDate = new Date(since).toISOString().slice(0, 10)
 
-    // Today window starts at the most recent UTC midnight. Cheap lower
-    // bound for the KPI 'cost today' card — pulse-style dashboard wants
-    // it without an extra round-trip.
-    const todayStart = new Date(now)
-    todayStart.setUTCHours(0, 0, 0, 0)
-    const todaySince = todayStart.getTime()
+    // Today window — defaults to UTC midnight, overridden by the caller's
+    // local midnight when supplied. Clamped to a sane recent range so a
+    // bogus client clock can't read events from years ago.
+    const utcMidnight = new Date(now)
+    utcMidnight.setUTCHours(0, 0, 0, 0)
+    const utcMidnightMs = utcMidnight.getTime()
+    const todaySince =
+      opts.todayStartMs !== undefined &&
+      Math.abs(opts.todayStartMs - utcMidnightMs) <= 24 * 3600_000
+        ? opts.todayStartMs
+        : utcMidnightMs
 
     // Members + their event totals + role/status. Joined against the
     // merged rollup so 30-day SUMs are over (users × nodes × models)

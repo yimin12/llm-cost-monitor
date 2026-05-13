@@ -104,9 +104,27 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: RouteCtx):
       sendJson(res, 401, { error: 'unauthenticated' })
       return
     }
+    // Optional `todayStartMs` query — the client's local midnight in
+    // millis. Lets the server's "today" boundary track the client's
+    // timezone instead of always splitting on UTC midnight, which
+    // otherwise leaves US users with an Account-today tile that lags
+    // their Today KPI by several hours after their local midnight.
+    let clientTodayStartMs: number | undefined
+    const queryStr = usageMatch[2]
+    if (queryStr !== undefined && queryStr.length > 1) {
+      const params = new URLSearchParams(queryStr.slice(1))
+      const raw = params.get('todayStartMs')
+      if (raw !== null) {
+        const parsed = Number(raw)
+        if (Number.isFinite(parsed) && parsed > 0) {
+          clientTodayStartMs = Math.floor(parsed)
+        }
+      }
+    }
     try {
       const overview = await ctx.service.getOverview(teamId, {
         requestingUserId: auth.userId,
+        ...(clientTodayStartMs !== undefined ? { todayStartMs: clientTodayStartMs } : {}),
       })
       sendJson(res, 200, overview)
     } catch (err) {
