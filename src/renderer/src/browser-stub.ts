@@ -217,7 +217,7 @@ const seedAlerts: Alert[] = [
 const WEB_API_BASE =
   (typeof window !== 'undefined'
     ? (window as unknown as { __LCM_WEB_API_BASE__?: string }).__LCM_WEB_API_BASE__
-    : undefined) ?? 'http://127.0.0.1:4018'
+    : undefined) ?? 'http://127.0.0.1:4019'
 
 function jsonReviver(_k: string, v: unknown): unknown {
   if (typeof v === 'string' && /^-?\d+n$/.test(v)) return BigInt(v.slice(0, -1))
