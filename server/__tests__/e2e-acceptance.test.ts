@@ -446,4 +446,169 @@ describe('end-to-end acceptance (plan.md Phase 5)', () => {
     expect(row.rows[0]!.v).toBe('snapshot-2026-05')
     await c.cleanup()
   })
+
+  // ─── Concurrency invariants ─────────────────────────────────────────
+  // Pairs with the consistency story in docs/multi-node-usage-merge-
+  // design.md. Each test fires Promise.all over two clients to actually
+  // exercise the parallel-write path the design assumes — not just two
+  // sequential drains pretending to be concurrent.
+
+  it('concurrency A: two users same team, parallel batches → both land, no interference', async () => {
+    const aliceCli = await makeClient({ userId: 'user-1', nodeId: 'mac', privacyLevel: 'redacted' })
+    const bobCli   = await makeClient({ userId: 'user-2', nodeId: 'linux', privacyLevel: 'redacted' })
+
+    await aliceCli.events.upsertMany([
+      makeEvent({ id: 'a1', timestamp: NOW, computedCostMicroUsd: 100n }),
+      makeEvent({ id: 'a2', timestamp: NOW + 1, computedCostMicroUsd: 200n }),
+    ])
+    await bobCli.events.upsertMany([
+      makeEvent({ id: 'b1', timestamp: NOW + 2, computedCostMicroUsd: 300n }),
+    ])
+
+    // Fire both drains at the same time. They touch disjoint rows (PK
+    // includes user_id), so neither should block the other beyond
+    // membership/teams metadata.
+    const [aliceOut, bobOut] = await Promise.all([
+      aliceCli.queue.drain(aliceCli.cfg),
+      bobCli.queue.drain(bobCli.cfg),
+    ])
+    expect(aliceOut.error).toBeNull()
+    expect(bobOut.error).toBeNull()
+
+    const ov = await (await fetch(`${baseUrl}/v1/teams/team-A/usage`, {
+      headers: { Authorization: 'Bearer user-1' },
+    })).json() as {
+      totalCostMicroUsd: string
+      totalEventCount: number
+      members: { userId: string; costMicroUsd: string; eventCount: number }[]
+    }
+    expect(ov.totalCostMicroUsd).toBe('600')  // 100 + 200 + 300
+    expect(ov.totalEventCount).toBe(3)
+    expect(ov.members.find((m) => m.userId === 'user-1')!.costMicroUsd).toBe('300')
+    expect(ov.members.find((m) => m.userId === 'user-2')!.costMicroUsd).toBe('300')
+
+    await aliceCli.cleanup()
+    await bobCli.cleanup()
+  })
+
+  it('concurrency B: same user two nodes, parallel batches → merged, no race loss', async () => {
+    // Two nodes share user, day, provider, model AND project_hash, so
+    // both batches will try to UPSERT the *same* event_daily_rollup row
+    // (PK is keyed by node_id so actually different rows — but the
+    // dashboard SUMs across them, which is what we assert).
+    const mac   = await makeClient({ userId: 'user-1', nodeId: 'mac',   privacyLevel: 'redacted' })
+    const linux = await makeClient({ userId: 'user-1', nodeId: 'linux', privacyLevel: 'redacted' })
+
+    // 25 events per node — enough to make the batch UPSERT take some
+    // wall time and increase the chance of interleaving.
+    const macEvents = Array.from({ length: 25 }, (_, i) =>
+      makeEvent({ id: `m-${i}`, timestamp: NOW + i, computedCostMicroUsd: 10n }),
+    )
+    const linuxEvents = Array.from({ length: 25 }, (_, i) =>
+      makeEvent({ id: `l-${i}`, timestamp: NOW + 100 + i, computedCostMicroUsd: 20n }),
+    )
+    await mac.events.upsertMany(macEvents)
+    await linux.events.upsertMany(linuxEvents)
+
+    const [m, l] = await Promise.all([
+      mac.queue.drain(mac.cfg),
+      linux.queue.drain(linux.cfg),
+    ])
+    expect(m.error).toBeNull()
+    expect(l.error).toBeNull()
+
+    const ov = await (await fetch(`${baseUrl}/v1/teams/team-A/usage`, {
+      headers: { Authorization: 'Bearer user-1' },
+    })).json() as { totalCostMicroUsd: string; totalEventCount: number }
+    // 25 × 10 + 25 × 20 = 750. If row locking dropped a write we'd be
+    // short. If a write got double-applied we'd be over.
+    expect(ov.totalCostMicroUsd).toBe('750')
+    expect(ov.totalEventCount).toBe(50)
+
+    await mac.cleanup()
+    await linux.cleanup()
+  })
+
+  it('concurrency C: two clients race the SAME batch → 3 rows total, never 6', async () => {
+    // Two fresh clients each prepare the same three UsageEvents
+    // (same user, same node, same local ids → same sync_event_ids
+    // after redaction). Fire both drains in parallel; whichever
+    // transaction COMMITs first plants the row, the loser sees
+    // ON CONFLICT DO NOTHING for that row. Net result: 3 rows
+    // total, accepted_total + duplicates_total = 6, never two of
+    // either side.
+    const make = async () => {
+      const c = await makeClient({ userId: 'user-1', nodeId: 'n', privacyLevel: 'redacted' })
+      await c.events.upsertMany([
+        makeEvent({ id: 'r1', timestamp: NOW,     computedCostMicroUsd: 100n }),
+        makeEvent({ id: 'r2', timestamp: NOW + 1, computedCostMicroUsd: 200n }),
+        makeEvent({ id: 'r3', timestamp: NOW + 2, computedCostMicroUsd: 300n }),
+      ])
+      return c
+    }
+    const a = await make()
+    const b = await make()
+    const [outA, outB] = await Promise.all([a.queue.drain(a.cfg), b.queue.drain(b.cfg)])
+    expect(outA.error).toBeNull()
+    expect(outB.error).toBeNull()
+    expect(outA.accepted + outA.duplicates + outB.accepted + outB.duplicates).toBe(6)
+    expect(outA.accepted + outB.accepted).toBe(3)   // exactly 3 rows landed
+    expect(outA.duplicates + outB.duplicates).toBe(3) // the other 3 attempts collided
+
+    const ov = await (await fetch(`${baseUrl}/v1/teams/team-A/usage`, {
+      headers: { Authorization: 'Bearer user-1' },
+    })).json() as { totalCostMicroUsd: string; totalEventCount: number }
+    expect(ov.totalEventCount).toBe(3)
+    expect(ov.totalCostMicroUsd).toBe('600')   // 100 + 200 + 300, no double-count
+    await a.cleanup()
+    await b.cleanup()
+  })
+
+  it('concurrency D: read fires mid-write → never observes a partial transaction', async () => {
+    // Drain that takes long enough to interleave with a read. We pile
+    // 200 events into one batch and issue many parallel GETs while it
+    // commits. Every GET must return a snapshot whose totalEventCount
+    // matches its totalCostMicroUsd / 100 — i.e. half-written rollups
+    // can never escape the transaction boundary.
+    const cli = await makeClient({ userId: 'user-1', nodeId: 'big', privacyLevel: 'redacted' })
+    const evts = Array.from({ length: 200 }, (_, i) =>
+      makeEvent({ id: `big-${i}`, timestamp: NOW + i, computedCostMicroUsd: 100n }),
+    )
+    await cli.events.upsertMany(evts)
+
+    const headers = { Authorization: 'Bearer user-1' }
+    const readers = Array.from({ length: 20 }, () =>
+      (async () => {
+        await new Promise((r) => setTimeout(r, Math.random() * 50))
+        const ov = await (await fetch(`${baseUrl}/v1/teams/team-A/usage`, { headers })).json() as {
+          totalCostMicroUsd: string; totalEventCount: number
+        }
+        return ov
+      })(),
+    )
+    const [drainOut, ...snapshots] = await Promise.all([
+      cli.queue.drain(cli.cfg),
+      ...readers,
+    ])
+    expect(drainOut.error).toBeNull()
+
+    for (const ov of snapshots) {
+      // Snapshot must be either "before commit" (0 events / 0 cost) or
+      // "after commit" (200 / 20000). No in-between.
+      const eventCount = ov.totalEventCount
+      const cost = Number(ov.totalCostMicroUsd)
+      const isBefore = eventCount === 0 && cost === 0
+      const isAfter  = eventCount === 200 && cost === 20000
+      expect(isBefore || isAfter).toBe(true)
+    }
+
+    // Final read must show the committed state.
+    const final = await (await fetch(`${baseUrl}/v1/teams/team-A/usage`, { headers })).json() as {
+      totalCostMicroUsd: string; totalEventCount: number
+    }
+    expect(final.totalEventCount).toBe(200)
+    expect(final.totalCostMicroUsd).toBe('20000')
+
+    await cli.cleanup()
+  })
 })
