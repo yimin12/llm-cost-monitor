@@ -11,11 +11,6 @@ import type {
 
 import { providerColor, providerName, timeAgo } from '../lib/format'
 
-function fmtCadence(ms: number): string {
-  if (ms < 60_000) return `${Math.round(ms / 1000)}s`
-  return `${Math.round(ms / 60_000)}m`
-}
-
 export function SettingsTab({
   settings, pricing, storage, providers, lastRefreshMs,
 }: {
@@ -34,26 +29,7 @@ export function SettingsTab({
 
   return (
     <>
-      <section className="settings-card">
-        <div className="settings-card-head">
-          <h3>Sync Status</h3>
-          <span className="enabled-dot on" />
-        </div>
-        <dl className="settings-rows">
-          <div>
-            <dt>Refresh cadence</dt>
-            <dd className="mono">{settings ? fmtCadence(settings.refreshIntervalMs) : '…'}</dd>
-          </div>
-          <div>
-            <dt>Last refresh</dt>
-            <dd>{lastRefreshMs !== null ? `${timeAgo(lastRefreshMs)} ago` : 'never'}</dd>
-          </div>
-          <div>
-            <dt>Status</dt>
-            <dd className="status-pill" data-state="on">connected · local</dd>
-          </div>
-        </dl>
-      </section>
+      <RefreshIntervalCard settings={settings} lastRefreshMs={lastRefreshMs} />
 
       <TeamSyncCard settings={settings} />
 
@@ -99,8 +75,6 @@ export function SettingsTab({
           })}
         </ul>
       </section>
-
-      <PlanOverrideCard providers={providers} settings={settings} />
 
       <PrivacyCard settings={settings} />
 
@@ -271,72 +245,106 @@ function TeamSyncCard({ settings }: { settings: AppSettings | null }): JSX.Eleme
   )
 }
 
-function PlanOverrideCard({
-  providers,
-  settings,
-}: {
-  providers: ProviderListEntry[]
-  settings: AppSettings | null
-}): JSX.Element {
-  // Local form mirror so each input is responsive; commit to settings on
-  // blur. Pre-seed from the persisted settings each time those change.
-  const [drafts, setDrafts] = useState<Record<string, string>>(() => ({}))
+// ── Refresh interval card ─────────────────────────────────────────
+// Single picker that drives both the local provider refresh tick AND the
+// team-sync drain interval — users think of them as one knob ("how often
+// does devbar look for new usage"), so the UI exposes them as one.
+// Values are deliberately coarse (5 / 10 / 30 / 60 min) — anything more
+// granular invites busywait and saves no real wall-clock time.
 
-  useEffect(() => {
-    if (settings === null) return
-    setDrafts({ ...settings.planOverrides })
-  }, [settings])
+const INTERVAL_OPTIONS: ReadonlyArray<{ minutes: number; label: string }> = [
+  { minutes: 5, label: 'Every 5 min' },
+  { minutes: 10, label: 'Every 10 min' },
+  { minutes: 30, label: 'Every 30 min' },
+  { minutes: 60, label: 'Every 1 hour' },
+]
 
-  const commit = useCallback(async (id: string, value: string) => {
-    const cur = settings?.planOverrides ?? {}
-    const trimmed = value.trim()
-    const next = { ...cur }
-    if (trimmed.length === 0) {
-      delete next[id]
-    } else {
-      next[id] = trimmed
+function nearestPresetMs(currentMs: number | undefined): number {
+  if (currentMs === undefined) return 5 * 60_000
+  let best = INTERVAL_OPTIONS[0]!.minutes * 60_000
+  let bestDelta = Math.abs(currentMs - best)
+  for (const opt of INTERVAL_OPTIONS) {
+    const ms = opt.minutes * 60_000
+    const delta = Math.abs(currentMs - ms)
+    if (delta < bestDelta) {
+      best = ms
+      bestDelta = delta
     }
-    await window.api.setSettings({ planOverrides: next })
-  }, [settings])
+  }
+  return best
+}
+
+function RefreshIntervalCard({
+  settings,
+  lastRefreshMs,
+}: {
+  settings: AppSettings | null
+  lastRefreshMs: number | null
+}): JSX.Element {
+  const [refreshing, setRefreshing] = useState(false)
+  const currentMs = settings?.refreshIntervalMs
+  const selectedMs = nearestPresetMs(currentMs)
+
+  const apply = useCallback(async (ms: number) => {
+    await window.api.setSettings({
+      refreshIntervalMs: ms,
+      // Sync drain follows the same cadence — users expect "every 10
+      // min" to mean both "scan local files" and "push to team server".
+      teamSync: { intervalMs: ms } as AppSettings['teamSync'],
+    })
+  }, [])
+
+  const onRefreshNow = useCallback(async () => {
+    setRefreshing(true)
+    try {
+      await window.api.providersRefresh()
+    } finally {
+      setRefreshing(false)
+    }
+  }, [])
 
   return (
     <section className="settings-card">
       <div className="settings-card-head">
-        <h3>Plan label override</h3>
-        <span className="settings-sub">manual</span>
+        <h3>Refresh & sync</h3>
+        <span className="enabled-dot on" />
       </div>
       <p className="settings-hint">
-        Some vendors don&rsquo;t expose subscription tier in their local
-        OAuth tokens (notably Google / Gemini). Set a label here to force
-        the chip to read &ldquo;Plan: <em>your text</em>&rdquo;. Leave
-        blank to fall back to the auto-detected value.
+        How often devbar scans your local provider folders and pushes to
+        the team server (if enabled).
       </p>
-      <div className="settings-form">
-        {providers.map((p) => {
-          const detected =
-            p.plan.authMode === 'subscription'
-              ? `Plan: ${p.plan.planName ?? 'Subscription'}`
-              : p.plan.authMode === 'oauth'
-                ? (p.plan.planName ?? 'OAuth')
-                : p.plan.authMode === 'apiKey'
-                  ? 'API Calling'
-                  : p.plan.authMode === 'none'
-                    ? 'no auth'
-                    : 'unknown'
+      <div className="settings-interval-row" role="radiogroup" aria-label="Refresh interval">
+        {INTERVAL_OPTIONS.map((opt) => {
+          const ms = opt.minutes * 60_000
+          const active = ms === selectedMs
           return (
-            <label key={p.id} className="form-row">
-              <span>{p.name}</span>
-              <input
-                type="text"
-                placeholder={detected}
-                value={drafts[p.id] ?? ''}
-                onChange={(e) => setDrafts((d) => ({ ...d, [p.id]: e.target.value }))}
-                onBlur={() => void commit(p.id, drafts[p.id] ?? '')}
-              />
-            </label>
+            <button
+              key={opt.minutes}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              className={active ? 'period-tab active' : 'period-tab'}
+              onClick={() => void apply(ms)}
+            >
+              {opt.label}
+            </button>
           )
         })}
       </div>
+      <dl className="settings-rows">
+        <div>
+          <dt>Last refresh</dt>
+          <dd>{lastRefreshMs !== null ? `${timeAgo(lastRefreshMs)} ago` : 'never'}</dd>
+        </div>
+      </dl>
+      <button
+        type="button"
+        className="action-btn"
+        onClick={() => void onRefreshNow()}
+        disabled={refreshing}
+      >
+        {refreshing ? 'refreshing…' : 'Refresh now'}
+      </button>
     </section>
   )
 }

@@ -414,10 +414,18 @@ void app.whenReady().then(async () => {
 
   // Kick the initial refresh in the background — don't block startup.
   runRefresh('startup')
-  // Re-scan periodically so newly written JSONL rows show up without
-  // requiring a manual click. Interval is read from settings.json
-  // (refreshIntervalMs); changes require a restart until the edit UI ships.
-  setInterval(() => runRefresh('periodic'), settings.get().refreshIntervalMs)
+  // Re-scan periodically so newly written JSONL rows show up without a
+  // manual click. The Settings tab "Refresh & sync" picker writes
+  // refreshIntervalMs (and teamSync.intervalMs to match); we listen for
+  // setting changes and rebuild the timers so the new cadence takes
+  // effect immediately, without an app restart.
+  let refreshTimer: ReturnType<typeof setInterval> | null = null
+  let syncTimer: ReturnType<typeof setInterval> | null = null
+  const rebuildRefreshTimer = (): void => {
+    if (refreshTimer !== null) clearInterval(refreshTimer)
+    refreshTimer = setInterval(() => runRefresh('periodic'), settings.get().refreshIntervalMs)
+  }
+  rebuildRefreshTimer()
 
   // Start the alert sampler — runs every settings.alerts.samplingIntervalMs
   // (default 30s), evaluates CPU/memory/cost thresholds, raises new alerts
@@ -460,7 +468,29 @@ void app.whenReady().then(async () => {
     }
   }
   // First drain happens shortly after startup; subsequent ones every
-  // teamSync.intervalMs.
+  // teamSync.intervalMs. Timer is rebuilt whenever the user changes the
+  // cadence in Settings.
   setTimeout(() => void runSyncDrain(), 10_000)
-  setInterval(() => void runSyncDrain(), settings.get().teamSync.intervalMs)
+  const rebuildSyncTimer = (): void => {
+    if (syncTimer !== null) clearInterval(syncTimer)
+    syncTimer = setInterval(() => void runSyncDrain(), settings.get().teamSync.intervalMs)
+  }
+  rebuildSyncTimer()
+
+  // Reflect Settings tab changes live: refreshIntervalMs and
+  // teamSync.intervalMs each rebuild their respective timer. Other
+  // settings (privacy, providers, etc.) flow through the existing
+  // subscribe path untouched.
+  let lastRefreshIntervalMs = settings.get().refreshIntervalMs
+  let lastSyncIntervalMs = settings.get().teamSync.intervalMs
+  settings.subscribe((next) => {
+    if (next.refreshIntervalMs !== lastRefreshIntervalMs) {
+      lastRefreshIntervalMs = next.refreshIntervalMs
+      rebuildRefreshTimer()
+    }
+    if (next.teamSync.intervalMs !== lastSyncIntervalMs) {
+      lastSyncIntervalMs = next.teamSync.intervalMs
+      rebuildSyncTimer()
+    }
+  })
 })
