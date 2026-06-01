@@ -32,10 +32,14 @@ Server source lives in the repo (`server/`, `server-migrations/`); it self-migra
 - Demo team already present: `team-demo` / member `user-1` (admin).
 
 ## How the image was built (1 GB box can't build it)
-`Dockerfile.server`'s build stage (`npm ci` + `tsc`) is too heavy for 1 GB, so it was **cross-built on the Mac**: `docker buildx build --platform linux/amd64 -f Dockerfile.server -t lcm-server:amd64 --load .`, then `docker save | ssh oci 'docker load'`.
+`Dockerfile.server`'s build stage (`npm ci` + `tsc`) is too heavy for 1 GB, so it's **cross-built on the Mac** and shipped as a tarball:
+`docker buildx build --platform linux/amd64 -f Dockerfile.server -t lcm-server:fixed --load .` → `docker save lcm-server:fixed | gzip | ssh oci 'gunzip | docker load'` → `cd ~/lcm-deploy && docker compose -f docker-compose.box.yml --env-file .env up -d --force-recreate server`.
 
-### ⚠️ Known bug worth a real fix
-`Dockerfile.server` runtime stage pins **`jose@6.2.3` (ESM-only)** but the server compiles to **CommonJS** → `require("jose")` throws `ERR_REQUIRE_ESM`, crash-loop. **Workaround applied on the box**: layered `jose@5.9.6` over the image → tag `lcm-server:fixed`. **Proper fix (TODO/PR):** pin `jose@5` in the runtime `npm install` line of `Dockerfile.server` (or emit ESM for the server build). `jose@5` is API-compatible for `createRemoteJWKSet`/`jwtVerify`/`decodeJwt`.
+### ~~Known bug~~ — FIXED (PR #26)
+`Dockerfile.server` previously pinned **`jose@6.2.3` (ESM-only)** but the server compiles to **CommonJS** → `require("jose")` threw `ERR_REQUIRE_ESM`, crash-loop. The runtime `npm install` now pins **`jose@5.9.6`** (API-compatible for `createRemoteJWKSet`/`jwtVerify`/`decodeJwt`). No more on-box layering — the built `lcm-server:fixed` image runs clean. The live box runs this rebuilt image as of 2026-06-01.
+
+## Real local usage persisted on the instance (2026-06-01)
+This Mac's actual usage was synced into the instance under team **`team-self`** (privacy `full`): **2,299 events, $540.26**, Apr 6 – Jun 1, attributed to the real node `5a6991de-…920` + Google sub `105375377941393769884` (hymlaucs@gmail.com). `session_id`/`message_id` are NULL on every row; 6 literal projects surface in `topProjects`. Re-sync with **`deploy/upload-local-events.js`** (`ENDPOINT=… TEAM=team-self node deploy/upload-local-events.js`, reads local `events`/`local_node`/`auth_user`). The read API windows to 30 days by default — pass `?window=<ms>` for full history.
 
 ## Deploy assets in the repo (for the production/public path)
 Uncommitted on `main` (created earlier): `docker-compose.prod.yml`, `deploy/Caddyfile`, `deploy/env.example`, `deploy/backup.sh`, `deploy/README.md`. These add **Caddy TLS + `jwks` auth + daily pg_dump backups** for a public deploy — use them when a domain is available.
