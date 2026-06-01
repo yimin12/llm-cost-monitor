@@ -954,6 +954,14 @@ body {
   font-size: 10.5px;
   font-family: inherit;
 }
+.yield-period-tag {
+  color: rgba(var(--fg), 0.55);
+  font-size: 10.5px;
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px dashed rgba(var(--fg), 0.18);
+}
 .yield-card-empty {
   font-size: 11.5px;
   color: rgba(var(--fg), 0.78);
@@ -977,8 +985,84 @@ body {
   display: grid;
   gap: 8px;
 }
+.kpi-grid-2 { grid-template-columns: repeat(2, 1fr); }
 .kpi-grid-3 { grid-template-columns: repeat(3, 1fr); }
 .kpi-grid-4 { grid-template-columns: repeat(4, 1fr); }
+
+/* Pre-login team-sync portal — full-width card that lifts the AuthHeader
+   sign-in action out of the corner when team sync is configured but
+   the user hasn't signed in yet. Hidden once auth state is signed-in. */
+.team-portal {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(120, 170, 255, 0.22);
+  background: linear-gradient(180deg, rgba(120, 170, 255, 0.10), rgba(120, 170, 255, 0.03));
+  margin-bottom: 12px;
+}
+.team-portal-body {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.team-portal-icon {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: rgba(120, 170, 255, 0.18);
+  color: rgba(180, 210, 255, 0.95);
+}
+.team-portal-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.team-portal-text h3 {
+  margin: 0 0 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(var(--fg), 0.96);
+}
+.team-portal-text p {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: rgba(var(--fg), 0.62);
+}
+.team-portal-error {
+  margin-top: 4px !important;
+  color: rgba(255, 170, 110, 0.85) !important;
+}
+.team-portal-cta {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.96);
+  color: #1f2937;
+  font-weight: 600;
+  font-size: 12px;
+  cursor: pointer;
+  transition: transform 140ms ease, background 140ms ease;
+}
+.team-portal-cta:hover:not(:disabled) {
+  background: #fff;
+  transform: translateY(-1px);
+}
+.team-portal-cta:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 
 .kpi-tile {
   display: flex;

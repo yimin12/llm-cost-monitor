@@ -293,13 +293,29 @@ describe('end-to-end acceptance (plan.md Phase 5)', () => {
     expect((bobView   as Overview).currentUserRole).toBe('member')
 
     // Strip viewer-specific bits and confirm everything else is byte-equal.
+    // currentUserMonth* fields are scoped to the requesting user (drives the
+    // per-account month-end forecast on each client), so they intentionally
+    // differ between alice's and bob's views — same as currentUserRole.
     const stripViewerFields = (o: unknown): unknown => {
       const cloned = JSON.parse(JSON.stringify(o)) as Record<string, unknown>
       delete cloned['generatedAt']
       delete cloned['currentUserRole']
+      delete cloned['currentUserMonthCostMicroUsd']
+      delete cloned['currentUserMonthByProvider']
       return cloned
     }
     expect(stripViewerFields(aliceView)).toEqual(stripViewerFields(bobView))
+
+    // …but the per-user fields themselves should reflect each viewer's
+    // own spend (alice's two nodes merged, bob's single node).
+    type PerUser = {
+      currentUserMonthCostMicroUsd: string | null
+      currentUserMonthByProvider: { provider: string; costMicroUsd: string; eventCount: number }[]
+    }
+    const aliceMtd = (aliceView as Overview & PerUser)
+    const bobMtd = (bobView as Overview & PerUser)
+    expect(aliceMtd.currentUserMonthCostMicroUsd).toBe('650000') // 180k + 470k
+    expect(bobMtd.currentUserMonthCostMicroUsd).toBe('250000')
 
     await aliceMac.cleanup()
     await aliceLinux.cleanup()

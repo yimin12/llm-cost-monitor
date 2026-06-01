@@ -41,7 +41,8 @@ export interface IpcDeps {
   syncQueue: SyncQueue | null
   // Fetches a TeamOverview from the backend. null when sync is disabled
   // or the backend is unreachable; renderer treats both the same.
-  fetchTeamOverview: (teamId: string, accessToken: string | null) => Promise<TeamOverview | null>
+  // `windowMs` forwards to the server's optional ?window=<ms> override.
+  fetchTeamOverview: (teamId: string, accessToken: string | null, windowMs?: number) => Promise<TeamOverview | null>
   // Admin-gated mutations against the team-sync server. Each handler is
   // a thin wrapper that the main process owns so it can attach the
   // bearer token + base URL without leaking either to the renderer.
@@ -78,12 +79,14 @@ function teamSyncFromSettings(s: AppSettings): {
   teamId: string | null
   userId: string | null
   privacyLevel: TeamSyncSettings['privacyLevel']
+  intervalMs: number
 } {
   return {
     enabled: s.teamSync.enabled,
     teamId: s.teamSync.teamId,
     userId: s.teamSync.userId,
     privacyLevel: s.teamSync.privacyLevel,
+    intervalMs: s.teamSync.intervalMs,
   }
 }
 
@@ -127,17 +130,24 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   })
   ipcMain.handle(IPC.SYNC_DRAIN, async (): Promise<SyncStatus | null> => {
     if (deps.syncQueue === null) return null
-    await deps.syncQueue.drain(teamSyncFromSettings(deps.settings.get()))
+    // SYNC_DRAIN is wired to the renderer's "Sync Now" button — an
+    // explicit user action that must run even when the daily-cadence
+    // gate would otherwise block it. forceDrain() bypasses; scheduled
+    // background sync still goes through plain drain().
+    await deps.syncQueue.forceDrain(teamSyncFromSettings(deps.settings.get()))
     const status = await deps.syncQueue.getStatus(teamSyncFromSettings(deps.settings.get()))
     broadcastSyncStatusChanged(status)
     return status
   })
-  ipcMain.handle(IPC.SYNC_TEAM_OVERVIEW, async (): Promise<TeamOverview | null> => {
-    const cfg = deps.settings.get().teamSync
-    if (!cfg.enabled || cfg.teamId === null) return null
-    const token = await deps.auth.accessTokenForSync().catch(() => null)
-    return deps.fetchTeamOverview(cfg.teamId, token)
-  })
+  ipcMain.handle(
+    IPC.SYNC_TEAM_OVERVIEW,
+    async (_e, windowMs?: number): Promise<TeamOverview | null> => {
+      const cfg = deps.settings.get().teamSync
+      if (!cfg.enabled || cfg.teamId === null) return null
+      const token = await deps.auth.accessTokenForSync().catch(() => null)
+      return deps.fetchTeamOverview(cfg.teamId, token, windowMs)
+    },
+  )
 
   // Helper: resolve teamId + bearer token, otherwise short-circuit to a
   // structured error the renderer can show as a toast.

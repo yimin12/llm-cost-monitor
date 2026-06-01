@@ -234,6 +234,82 @@ describe('TeamService', () => {
     expect(r1.rows[0]!.ts).toBeDefined()
   })
 
+  // ─── device limit per (team, user) ─────────────────────────────────
+
+  it('device limit: first 5 distinct nodes accepted, 6th rejected, existing nodes unaffected', async () => {
+    // Default cap is 5. Push 5 different node_ids through — all should
+    // land. The 6th from a new node_id must be rejected with
+    // device_limit_exceeded; meanwhile uploads from any of the first 5
+    // keep working.
+    for (let i = 1; i <= 5; i++) {
+      const r = await svc.batchUpsert('team-A', [
+        evt({ node_id: `dev-${i}`, local_event_id: `e-${i}` }),
+      ])
+      expect(r.accepted).toHaveLength(1)
+      expect(r.rejected).toHaveLength(0)
+    }
+    // 6th device — over the cap.
+    const six = await svc.batchUpsert('team-A', [
+      evt({ node_id: 'dev-6', local_event_id: 'e-6' }),
+    ])
+    expect(six.accepted).toHaveLength(0)
+    expect(six.rejected).toHaveLength(1)
+    expect(six.rejected[0]!.reason).toContain('device_limit_exceeded')
+
+    // Existing devices keep working — they're already in the set.
+    const replay = await svc.batchUpsert('team-A', [
+      evt({ node_id: 'dev-3', local_event_id: 'e-3-followup' }),
+    ])
+    expect(replay.accepted).toHaveLength(1)
+    expect(replay.rejected).toHaveLength(0)
+  })
+
+  it('device limit: cap is per (team, user) — different users share no quota', async () => {
+    // user-1 maxes out at 5 nodes; user-2 can still register their own
+    // first node on team-A. Limits don't bleed across users.
+    for (let i = 1; i <= 5; i++) {
+      await svc.batchUpsert('team-A', [
+        evt({ node_id: `u1-dev-${i}`, local_event_id: `u1-${i}` }),
+      ])
+    }
+    const u2 = await svc.batchUpsert('team-A', [
+      evt({ user_id: 'user-2', node_id: 'u2-dev-1', local_event_id: 'u2-1' }),
+    ])
+    expect(u2.accepted).toHaveLength(1)
+    expect(u2.rejected).toHaveLength(0)
+  })
+
+  it('device limit: cap is configurable via constructor (tighter cap rejects sooner)', async () => {
+    // Spin up a service that only allows 2 devices to confirm the
+    // constructor option propagates. Uses the same DB; reusing it is
+    // fine because we delete rows in beforeEach.
+    const tightSvc = new TeamService(pool, { maxDevicesPerUser: 2 })
+    expect((await tightSvc.batchUpsert('team-A', [
+      evt({ node_id: 'tight-1', local_event_id: 't-1' }),
+    ])).accepted).toHaveLength(1)
+    expect((await tightSvc.batchUpsert('team-A', [
+      evt({ node_id: 'tight-2', local_event_id: 't-2' }),
+    ])).accepted).toHaveLength(1)
+    const over = await tightSvc.batchUpsert('team-A', [
+      evt({ node_id: 'tight-3', local_event_id: 't-3' }),
+    ])
+    expect(over.rejected[0]!.reason).toContain('max 2 devices')
+  })
+
+  it('device limit: same batch with multiple new nodes from one user stops at the cap', async () => {
+    // 7 brand-new node_ids in one batch for the same user. First 5
+    // accepted (cap=5), last 2 rejected. The in-batch mutation of the
+    // node set is what makes this case correct — without it the batch
+    // would see size=0 for every payload and accept all 7.
+    const payloads = Array.from({ length: 7 }, (_, i) =>
+      evt({ node_id: `burst-${i}`, local_event_id: `b-${i}` }),
+    )
+    const r = await svc.batchUpsert('team-A', payloads)
+    expect(r.accepted).toHaveLength(5)
+    expect(r.rejected).toHaveLength(2)
+    expect(r.rejected.every((x) => x.reason.includes('device_limit_exceeded'))).toBe(true)
+  })
+
   // ─── event_daily_rollup invariants (written by TeamService.batchUpsert
   //     in the same transaction as the raw event INSERT). ───────────────
 

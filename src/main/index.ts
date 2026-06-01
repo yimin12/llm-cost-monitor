@@ -252,7 +252,12 @@ void app.whenReady().then(async () => {
 
   aggregator = new Aggregator(pool)
   const fileCache = new FileCache(pool)
-  providers = new ProviderRegistry({ pricing, events, fileCache })
+  providers = new ProviderRegistry({
+    pricing,
+    events,
+    fileCache,
+    googlePlanCachePath: path.join(app.getPath('userData'), 'google-plan-cache.json'),
+  })
   const settings = new SettingsStore(path.join(app.getPath('userData'), 'settings.json'))
 
   // Exports today's spend to a JSON file the Claude Code statusline
@@ -315,10 +320,15 @@ void app.whenReady().then(async () => {
     auth,
     alerts: alertRepo,
     syncQueue,
-    fetchTeamOverview: async (teamId, token) => {
+    fetchTeamOverview: async (teamId, token, windowMs) => {
       const baseUrl = settings.effectiveSyncUrl()
       if (baseUrl === null) return null
-      return fetchTeamOverview({ baseUrl, teamId, accessToken: token })
+      return fetchTeamOverview({
+        baseUrl,
+        teamId,
+        accessToken: token,
+        ...(windowMs !== undefined ? { windowMs } : {}),
+      })
     },
     teamAddMember: async (teamId, token, body) => {
       const baseUrl = settings.effectiveSyncUrl()
@@ -415,10 +425,18 @@ void app.whenReady().then(async () => {
 
   // Kick the initial refresh in the background — don't block startup.
   runRefresh('startup')
-  // Re-scan periodically so newly written JSONL rows show up without
-  // requiring a manual click. Interval is read from settings.json
-  // (refreshIntervalMs); changes require a restart until the edit UI ships.
-  setInterval(() => runRefresh('periodic'), settings.get().refreshIntervalMs)
+  // Re-scan periodically so newly written JSONL rows show up without a
+  // manual click. The Settings tab "Refresh & sync" picker writes
+  // refreshIntervalMs (and teamSync.intervalMs to match); we listen for
+  // setting changes and rebuild the timers so the new cadence takes
+  // effect immediately, without an app restart.
+  let refreshTimer: ReturnType<typeof setInterval> | null = null
+  let syncTimer: ReturnType<typeof setInterval> | null = null
+  const rebuildRefreshTimer = (): void => {
+    if (refreshTimer !== null) clearInterval(refreshTimer)
+    refreshTimer = setInterval(() => runRefresh('periodic'), settings.get().refreshIntervalMs)
+  }
+  rebuildRefreshTimer()
 
   // Start the alert sampler — runs every settings.alerts.samplingIntervalMs
   // (default 30s), evaluates CPU/memory/cost thresholds, raises new alerts
@@ -434,21 +452,20 @@ void app.whenReady().then(async () => {
     if (syncQueue === null) return
     const cfg = settings.get().teamSync
     if (!cfg.enabled || cfg.teamId === null || cfg.userId === null) return
+    const drainCfg = {
+      enabled: true,
+      teamId: cfg.teamId,
+      userId: cfg.userId,
+      privacyLevel: cfg.privacyLevel,
+      intervalMs: cfg.intervalMs,
+    } as const
     try {
-      const out = await syncQueue.drain({
-        enabled: true,
-        teamId: cfg.teamId,
-        userId: cfg.userId,
-        privacyLevel: cfg.privacyLevel,
-      })
-      const status = await syncQueue.getStatus({
-        enabled: true,
-        teamId: cfg.teamId,
-        userId: cfg.userId,
-        privacyLevel: cfg.privacyLevel,
-      })
+      const out = await syncQueue.drain(drainCfg)
+      const status = await syncQueue.getStatus(drainCfg)
       broadcastSyncStatusChanged(status)
-      if (out.error !== null) {
+      if (out.skipped === 'rate_limited') {
+        // No-op — cadence gate did its job. Don't spam the log.
+      } else if (out.error !== null) {
         console.warn(`sync drain: ${out.error}`)
       } else if (out.uploaded > 0) {
         console.log(
@@ -461,7 +478,31 @@ void app.whenReady().then(async () => {
     }
   }
   // First drain happens shortly after startup; subsequent ones every
-  // teamSync.intervalMs.
+  // teamSync.intervalMs. Timer is rebuilt whenever the user changes the
+  // cadence in Settings. The real cadence floor is enforced inside
+  // SyncQueue (drain() returns skipped:'rate_limited' until intervalMs has
+  // elapsed), so this timer firing early is a cheap no-op.
   setTimeout(() => void runSyncDrain(), 10_000)
-  setInterval(() => void runSyncDrain(), settings.get().teamSync.intervalMs)
+  const rebuildSyncTimer = (): void => {
+    if (syncTimer !== null) clearInterval(syncTimer)
+    syncTimer = setInterval(() => void runSyncDrain(), settings.get().teamSync.intervalMs)
+  }
+  rebuildSyncTimer()
+
+  // Reflect Settings tab changes live: refreshIntervalMs and
+  // teamSync.intervalMs each rebuild their respective timer. Other
+  // settings (privacy, providers, etc.) flow through the existing
+  // subscribe path untouched.
+  let lastRefreshIntervalMs = settings.get().refreshIntervalMs
+  let lastSyncIntervalMs = settings.get().teamSync.intervalMs
+  settings.subscribe((next) => {
+    if (next.refreshIntervalMs !== lastRefreshIntervalMs) {
+      lastRefreshIntervalMs = next.refreshIntervalMs
+      rebuildRefreshTimer()
+    }
+    if (next.teamSync.intervalMs !== lastSyncIntervalMs) {
+      lastSyncIntervalMs = next.teamSync.intervalMs
+      rebuildSyncTimer()
+    }
+  })
 })

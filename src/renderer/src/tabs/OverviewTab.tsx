@@ -1,5 +1,7 @@
-import type { AggregateSnapshot, CostByModel, CostByProject, CostByProvider } from '@shared/aggregates'
-import type { AppSettings } from '@shared/ipc-channels'
+import { useEffect, useState } from 'react'
+
+import type { AggregateSnapshot, CostByModel, CostByProject, CostByProvider, MonthlyForecast } from '@shared/aggregates'
+import type { AppSettings, TeamOverview, TeamProviderUsage } from '@shared/ipc-channels'
 
 import { AreaChart, ShareBar, useAnimatedNumber } from '../components/charts'
 import { KpiTile } from '../components/KpiTile'
@@ -136,6 +138,23 @@ const IconProviders = (
     <path d="M8.5 7.5L11 16M15.5 7.5L13 16" />
   </svg>
 )
+// Laptop / device icon for the per-account "nodes" KPI — used on the
+// team-aggregated row to communicate "this number is across machines".
+const IconNodes = (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <rect x="3" y="4" width="18" height="12" rx="2" />
+    <path d="M2 20h20" />
+  </svg>
+)
+
+// Poll cadence for the team-aggregated KPI row. The local-machine KPIs
+// repaint on every aggregate refresh tick (~30s, driven by the sampler);
+// the team aggregate comes from the server's team-overview endpoint and
+// changes only when *other* nodes drain to it, so we don't need it
+// every 30s. 5 min keeps the cross-device totals fresh-feeling without
+// hammering the server.
+const TEAM_KPI_POLL_MS = 5 * 60 * 1000
 
 const PERIOD_LABEL: Record<Period, string> = {
   today: 'Today',
@@ -145,6 +164,75 @@ const PERIOD_LABEL: Record<Period, string> = {
   '1y': '1y',
 }
 
+// Replace the local forecast's MTD spend with the user's team-wide MTD
+// (from the team server) when team sync is on. The linear projection
+// (×daysInMonth ÷ daysElapsed) stays client-side so the math is identical
+// to the local code path. Per-provider forecasts get the same swap from
+// `currentUserMonthByProvider`, with cost-keyed aggregation across the
+// per-model tuples that endpoint returns. Returns `null` to signal "use
+// the local forecast unchanged" — keeps the call site declarative.
+function teamScopedForecast(
+  local: AggregateSnapshot,
+  team: TeamOverview | null,
+  settings: AppSettings | null,
+): {
+  forecast: MonthlyForecast | null
+  forecastByProvider: Record<string, MonthlyForecast>
+  source: 'team' | 'local'
+} {
+  if (
+    settings?.teamSync?.enabled !== true ||
+    team === null ||
+    team.currentUserMonthCostMicroUsd === null ||
+    local.forecast === null
+  ) {
+    return {
+      forecast: local.forecast,
+      forecastByProvider: local.forecastByProvider,
+      source: 'local',
+    }
+  }
+  const base = local.forecast
+  const spent = BigInt(team.currentUserMonthCostMicroUsd)
+  // Same linear formula the local aggregator uses (see
+  // src/main/aggregation/aggregator.ts forecast section).
+  const estimate =
+    base.daysElapsed > 0
+      ? (spent * BigInt(base.daysInMonth)) / BigInt(base.daysElapsed)
+      : spent
+  const forecast: MonthlyForecast = {
+    monthStartMs: base.monthStartMs,
+    daysElapsed: base.daysElapsed,
+    daysInMonth: base.daysInMonth,
+    spentMicroUsd: spent,
+    estimateMicroUsd: estimate,
+    confidenceBandMicroUsd: base.confidenceBandMicroUsd,
+  }
+
+  // Roll the per-(provider, model) MTD rows up into per-provider buckets
+  // and project. Models with no entry stay out of the breakdown — we don't
+  // synthesize empty rows.
+  const byProvider: Record<string, MonthlyForecast> = {}
+  for (const row of team.currentUserMonthByProvider as TeamProviderUsage[]) {
+    const cur = byProvider[row.provider]?.spentMicroUsd ?? 0n
+    const spentP = cur + BigInt(row.costMicroUsd)
+    const estP =
+      base.daysElapsed > 0
+        ? (spentP * BigInt(base.daysInMonth)) / BigInt(base.daysElapsed)
+        : spentP
+    byProvider[row.provider] = {
+      monthStartMs: base.monthStartMs,
+      daysElapsed: base.daysElapsed,
+      daysInMonth: base.daysInMonth,
+      spentMicroUsd: spentP,
+      estimateMicroUsd: estP,
+      confidenceBandMicroUsd: 0n,
+    }
+  }
+
+  return { forecast, forecastByProvider: byProvider, source: 'team' }
+}
+
 export function OverviewTab({ agg, period, onPeriodChange, settings }: {
   agg: AggregateSnapshot
   period: Period
@@ -152,6 +240,67 @@ export function OverviewTab({ agg, period, onPeriodChange, settings }: {
   settings: AppSettings | null
 }): JSX.Element {
   const range = agg[PERIOD_RANGE[period]]
+
+  // Team-aggregated KPI row — sums the signed-in user's events across
+  // every machine they've registered. Polls the server every 5 min so
+  // numbers from a second device (e.g. a remote mac) flow in without
+  // requiring a manual refresh. Hidden when team sync isn't configured.
+  const teamSync = settings?.teamSync
+  const teamEnabled = teamSync?.enabled === true && teamSync.teamId !== null
+  const myUserId = teamSync?.userId ?? null
+  // Period → ms window passed to the server so the account row matches
+  // whatever range the user picked above (Today/7d/1m/6m/1y). For
+  // "today" we anchor to UTC midnight (matching the local Today tile
+  // semantics) — a rolling 24h window would inflate the number with
+  // yesterday-evening calls.
+  const periodWindowMs = (() => {
+    if (period === 'today') {
+      const d = new Date()
+      const midnightUtc = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
+      return Math.max(1, Date.now() - midnightUtc)
+    }
+    return PERIOD_DAYS[period] * 24 * 60 * 60 * 1000
+  })()
+  const [teamOverview, setTeamOverview] = useState<TeamOverview | null>(null)
+  useEffect(() => {
+    if (!teamEnabled) {
+      setTeamOverview(null)
+      return
+    }
+    let cancelled = false
+    const tick = async (): Promise<void> => {
+      try {
+        const ov = await window.api.syncTeamOverview(periodWindowMs)
+        if (!cancelled) setTeamOverview(ov)
+      } catch {
+        if (!cancelled) setTeamOverview(null)
+      }
+    }
+    void tick()
+    const id = window.setInterval(() => void tick(), TEAM_KPI_POLL_MS)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [teamEnabled, teamSync?.teamId, periodWindowMs])
+
+  // Pull out the current user's row + their nodes. Null when team sync
+  // is on but the user hasn't synced yet (no member row on the server).
+  const me = myUserId === null
+    ? null
+    : (teamOverview?.members.find((m) => m.userId === myUserId) ?? null)
+  const myNodes =
+    myUserId === null || teamOverview === null
+      ? []
+      : teamOverview.nodes.filter((n) => n.userId === myUserId)
+  const myNodeCount = myNodes.length
+  // "Active now" — device touched the server inside the last 24h. Same
+  // rule the server uses for the team activeNodes KPI, scoped to the
+  // signed-in user.
+  const activeWindowMs = Date.now() - 24 * 3600 * 1000
+  const myActiveCount = myNodes.filter(
+    (n) => n.lastSeenAt !== null && n.lastSeenAt >= activeWindowMs,
+  ).length
   const providerRows =
     period === 'today' ? agg.byProviderToday : agg[PERIOD_BY_PROVIDER[period]]
 
@@ -161,11 +310,15 @@ export function OverviewTab({ agg, period, onPeriodChange, settings }: {
 
   const tokens = range.inputTokens + range.outputTokens
 
-  const forecastPct = agg.forecast
+  const scoped = teamScopedForecast(agg, teamOverview, settings)
+  const forecast = scoped.forecast
+  const forecastByProvider = scoped.forecastByProvider
+
+  const forecastPct = forecast
     ? Math.min(
         100,
-        (Number(agg.forecast.spentMicroUsd) /
-          Math.max(1, Number(agg.forecast.estimateMicroUsd))) *
+        (Number(forecast.spentMicroUsd) /
+          Math.max(1, Number(forecast.estimateMicroUsd))) *
           100,
       )
     : 0
@@ -220,6 +373,44 @@ export function OverviewTab({ agg, period, onPeriodChange, settings }: {
         />
       </section>
 
+      {/* Account total — merged across every machine the user signs
+          into, scoped to the same period as the local row above (the
+          server's ?window=<ms> takes the period's day count). Polls
+          team-overview every 5 min so a second device shows up without
+          manual refresh. Three tiles: cost + tokens (the headline
+          numbers) and active devices NOW. */}
+      {me !== null && (
+        <section
+          className="kpi-grid kpi-grid-3 hero-tiles"
+          aria-label={`Account total across ${myNodeCount} device${myNodeCount === 1 ? '' : 's'}`}
+        >
+          <KpiTile
+            icon={IconDollar}
+            iconColor="rgba(120, 200, 140, 0.95)"
+            label="Account cost"
+            value={(() => {
+              const usd = Number(me.costMicroUsd) / 1_000_000
+              return usd >= 100 ? `$${usd.toFixed(1)}` : `$${usd.toFixed(2)}`
+            })()}
+            sub={`${PERIOD_LABEL[period]} total`}
+          />
+          <KpiTile
+            icon={IconTokens}
+            iconColor="rgba(167, 139, 250, 0.95)"
+            label="Account tokens"
+            value={formatTokens(me.inputTokens + me.outputTokens)}
+            sub={`${PERIOD_LABEL[period]} in + out`}
+          />
+          <KpiTile
+            icon={IconNodes}
+            iconColor="rgba(160, 200, 255, 0.95)"
+            label="Active now"
+            value={`${myActiveCount}/${myNodeCount}`}
+            sub="24h window"
+          />
+        </section>
+      )}
+
       {(() => {
         const days = PERIOD_DAYS[period]
         const series = agg.dailyCostMicroUsd.slice(-days)
@@ -241,31 +432,38 @@ export function OverviewTab({ agg, period, onPeriodChange, settings }: {
         )
       })()}
 
-      {agg.forecast !== null ? (
+      {forecast !== null ? (
         <section className="forecast-card">
           <div className="forecast-card-head">
-            <span className="chart-card-title">Month-end forecast · total</span>
+            <span className="chart-card-title">
+              Month-end forecast · total
+              {scoped.source === 'team' && (
+                <span className="forecast-source-tag" title="Aggregated across your synced nodes via team sync">
+                  {' '}· account-wide
+                </span>
+              )}
+            </span>
             <span className="forecast-pct">{forecastPct.toFixed(0)}%</span>
           </div>
           <div className="forecast-bar" aria-hidden>
             <div className="forecast-bar-fill" style={{ width: `${forecastPct}%` }} />
           </div>
           <div className="forecast-meta">
-            <span><strong>{microToUsd(agg.forecast.spentMicroUsd)}</strong> spent</span>
-            <span className="forecast-mid">day {agg.forecast.daysElapsed} / {agg.forecast.daysInMonth}</span>
-            <span>~<strong>{microToUsd(agg.forecast.estimateMicroUsd)}</strong> est.</span>
+            <span><strong>{microToUsd(forecast.spentMicroUsd)}</strong> spent</span>
+            <span className="forecast-mid">day {forecast.daysElapsed} / {forecast.daysInMonth}</span>
+            <span>~<strong>{microToUsd(forecast.estimateMicroUsd)}</strong> est.</span>
           </div>
 
-          {Object.keys(agg.forecastByProvider).length > 0 && (
+          {Object.keys(forecastByProvider).length > 0 && (
             <ul className="forecast-by-provider">
-              {Object.entries(agg.forecastByProvider)
+              {Object.entries(forecastByProvider)
                 .sort((a, b) =>
                   Number(b[1].estimateMicroUsd) - Number(a[1].estimateMicroUsd),
                 )
                 .map(([provider, f]) => {
                   const color = providerColor(provider)
                   const est = Number(f.estimateMicroUsd)
-                  const totalEst = Math.max(1, Number(agg.forecast?.estimateMicroUsd ?? 1n))
+                  const totalEst = Math.max(1, Number(forecast.estimateMicroUsd))
                   const sharePct = (est / totalEst) * 100
                   const spentPct = est > 0 ? (Number(f.spentMicroUsd) / est) * 100 : 0
                   return (
@@ -294,27 +492,30 @@ export function OverviewTab({ agg, period, onPeriodChange, settings }: {
         </section>
       )}
 
-      <YieldScoreCard settings={settings} />
+      <YieldScoreCard settings={settings} outerPeriod={period} />
 
+      {/* Overview cards are summary tiles — the full ranked lists live on
+          dedicated tabs (Providers / Sessions). Cap to top 3 each so the
+          page stays scannable; a long tail dilutes the headline. */}
       <section className="block">
         <div className="block-head">
-          <h3>By provider · {PERIOD_LABEL[period]}</h3>
+          <h3>Top providers · {PERIOD_LABEL[period]}</h3>
         </div>
-        <ProviderRows rows={providerRows} />
+        <ProviderRows rows={providerRows.slice(0, 3)} />
       </section>
 
       <section className="block">
         <div className="block-head">
           <h3>Top models · today</h3>
         </div>
-        <ModelRows rows={agg.topModelsToday} />
+        <ModelRows rows={agg.topModelsToday.slice(0, 3)} />
       </section>
 
       <section className="block">
         <div className="block-head">
           <h3>Top projects · today</h3>
         </div>
-        <ProjectRows rows={agg.topProjectsToday} />
+        <ProjectRows rows={agg.topProjectsToday.slice(0, 3)} />
       </section>
     </>
   )

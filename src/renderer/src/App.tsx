@@ -61,7 +61,7 @@ declare global {
       onAlertsUpdated: (cb: () => void) => () => void
       syncStatus: () => Promise<SyncStatus | null>
       syncDrain: () => Promise<SyncStatus | null>
-      syncTeamOverview: () => Promise<TeamOverview | null>
+      syncTeamOverview: (windowMs?: number) => Promise<TeamOverview | null>
       onSyncStatusChanged: (cb: (s: SyncStatus | null) => void) => () => void
       teamAddMember: (body: {
         userId: string

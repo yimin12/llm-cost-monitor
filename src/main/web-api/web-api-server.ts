@@ -33,7 +33,7 @@ export interface WebApiDeps {
   auth: AuthService
 }
 
-const DEFAULT_PORT = Number(process.env['LCM_WEB_API_PORT'] ?? 4_018)
+const DEFAULT_PORT = Number(process.env['LCM_WEB_API_PORT'] ?? 4_019)
 // Allow any origin. Safe because the server itself binds to
 // 127.0.0.1 only — there's no LAN attack surface. The renderer
 // (whether opened at localhost:5173 or 127.0.0.1:5173 or a future
@@ -132,7 +132,15 @@ async function handle(
         return
       }
       const token = await deps.auth.accessTokenForSync().catch(() => null)
-      const overview = await fetchTeamOverview({ baseUrl, teamId: cfg.teamId, accessToken: token })
+      const rawWindow = url.searchParams.get('window')
+      const parsedWindow = rawWindow !== null ? Number(rawWindow) : NaN
+      const windowMs = Number.isFinite(parsedWindow) && parsedWindow > 0 ? parsedWindow : undefined
+      const overview = await fetchTeamOverview({
+        baseUrl,
+        teamId: cfg.teamId,
+        accessToken: token,
+        ...(windowMs !== undefined ? { windowMs } : {}),
+      })
       sendJson(res, 200, overview)
       return
     }

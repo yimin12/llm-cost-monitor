@@ -15,6 +15,12 @@ import type { SyncTransport, TransportError } from './transport'
 // small and to bound the worst-case retry blast radius.
 export const MAX_BATCH_SIZE = 500
 
+// Default cadence: drain once per day. Most teams don't need event-level
+// freshness; a daily roll-up keeps server bandwidth bounded and matches
+// the product spec. The renderer's "Sync Now" button bypasses this via
+// SyncQueue.forceDrain().
+export const DEFAULT_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000
+
 export interface SyncQueueDeps {
   outbox: OutboxRepository
   cursors: CursorRepository
@@ -37,6 +43,11 @@ export interface DrainConfig {
   teamId: string | null
   userId: string | null
   privacyLevel: PrivacyLevel
+  // Minimum time between drains, in ms. Defaults to DEFAULT_SYNC_INTERVAL_MS
+  // (24h). drain() returns early with `skipped: 'rate_limited'` when this
+  // interval hasn't elapsed since the last successful upload; forceDrain()
+  // ignores it.
+  intervalMs?: number
 }
 
 // Outcome of a single drain. Surfaced through SyncStatus and the audit log.
@@ -51,6 +62,10 @@ export interface DrainOutcome {
   rejected: number
   newCursorMs: number | null
   error: string | null
+  // Set when drain() returns early because the interval window hasn't
+  // elapsed. Callers (host scheduler, renderer status pane) can use this
+  // to distinguish "ran but nothing to do" from "rate-limited".
+  skipped?: 'rate_limited'
 }
 
 // The queue. Methods are explicit — no auto-start, no setInterval. The host
@@ -83,11 +98,13 @@ export class SyncQueue {
 
   async getStatus(cfg: DrainConfig): Promise<SyncStatus> {
     const node = await this.nodes.ensure()
+    const intervalMs = cfg.intervalMs ?? DEFAULT_SYNC_INTERVAL_MS
     if (!cfg.enabled || cfg.teamId === null || cfg.userId === null) {
       return {
         configured: cfg.teamId !== null && cfg.userId !== null,
         enabled: cfg.enabled,
         lastSyncAt: this.lastSyncAt,
+        nextSyncAt: null,
         pendingCount: 0,
         lastError: this.lastError,
         nodeId: node.nodeId,
@@ -96,25 +113,41 @@ export class SyncQueue {
     const cursor = await this.cursors.get(cfg.teamId, cfg.userId)
     const lastSeq = cursor?.lastSentSeq ?? 0n
     const pendingCount = await this.outbox.pendingCount(lastSeq)
+    const lastSyncAt = cursor?.lastSyncedAt ?? this.lastSyncAt
     return {
       configured: true,
       enabled: true,
-      lastSyncAt: cursor?.lastSyncedAt ?? this.lastSyncAt,
+      lastSyncAt,
+      nextSyncAt: lastSyncAt === null ? null : lastSyncAt + intervalMs,
       pendingCount,
       lastError: cursor?.lastError ?? this.lastError,
       nodeId: node.nodeId,
     }
   }
 
+  // Normal scheduled drain. Skips when the per-config interval hasn't
+  // elapsed since the last successful sync — caller can rely on calling
+  // this every few minutes without spamming the server.
   drain(cfg: DrainConfig): Promise<DrainOutcome> {
+    return this.drainGated(cfg, false)
+  }
+
+  // "Sync Now" bypass. Same machinery, ignores intervalMs. Use sparingly:
+  // tied to an explicit user action (button click, finished sign-in flow,
+  // etc.) — not to a setInterval.
+  forceDrain(cfg: DrainConfig): Promise<DrainOutcome> {
+    return this.drainGated(cfg, true)
+  }
+
+  private drainGated(cfg: DrainConfig, force: boolean): Promise<DrainOutcome> {
     if (this.inflight !== null) return this.inflight
-    this.inflight = this.drainImpl(cfg).finally(() => {
+    this.inflight = this.drainImpl(cfg, force).finally(() => {
       this.inflight = null
     })
     return this.inflight
   }
 
-  private async drainImpl(cfg: DrainConfig): Promise<DrainOutcome> {
+  private async drainImpl(cfg: DrainConfig, force: boolean): Promise<DrainOutcome> {
     const empty: DrainOutcome = {
       initialPending: 0,
       uploaded: 0,
@@ -126,8 +159,18 @@ export class SyncQueue {
     }
     if (!cfg.enabled || cfg.teamId === null || cfg.userId === null) return empty
 
+    // Cadence gate. The interval is measured against the most recent
+    // successful sync — failed drains do not push the window forward, so
+    // a flaky server doesn't stretch the schedule. forceDrain() bypasses.
+    const intervalMs = cfg.intervalMs ?? DEFAULT_SYNC_INTERVAL_MS
+    const cursorPeek = await this.cursors.get(cfg.teamId, cfg.userId)
+    const lastSyncAt = cursorPeek?.lastSyncedAt ?? this.lastSyncAt
+    if (!force && lastSyncAt !== null && this.now() - lastSyncAt < intervalMs) {
+      return { ...empty, skipped: 'rate_limited' }
+    }
+
     const node = await this.nodes.ensure()
-    const cursor = await this.cursors.get(cfg.teamId, cfg.userId)
+    const cursor = cursorPeek
     const lastSeq = cursor?.lastSentSeq ?? 0n
 
     // Pull the next batch from the outbox. seq is monotonic and unique,

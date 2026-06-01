@@ -353,6 +353,9 @@ export function TeamTab({ settings, dashboardUrl }: {
         </ul>
       </section>
 
+      {/* Tray surface = glance. Cap each long-tail breakdown to top 3 so
+          the dropdown stays scannable; the audit drilldown lives on the
+          browser dashboard (Cmd-click the globe icon in the footer). */}
       <section className="settings-card">
         <div className="settings-card-head">
           <h3>Top projects (30d)</h3>
@@ -361,8 +364,13 @@ export function TeamTab({ settings, dashboardUrl }: {
           <p className="empty">no project activity</p>
         ) : (
           <ul className="rows">
-            {overview.topProjects.map((p) => (
+            {overview.topProjects.slice(0, 3).map((p) => (
               <li key={p.projectKey}>
+                {/* chip slot keeps the row aligned with .rows grid (first
+                    column is the 8px chip; without this placeholder the
+                    label gets squeezed into the chip column and only the
+                    leading char survives the text-overflow: ellipsis). */}
+                <span className="row-chip neutral" />
                 <span className="row-label" title={p.redacted ? 'project name redacted' : p.projectKey}>
                   {p.redacted ? `${p.projectKey.slice(0, 8)}… (redacted)` : p.projectKey}
                 </span>
@@ -379,7 +387,7 @@ export function TeamTab({ settings, dashboardUrl }: {
           <h3>By provider · model</h3>
         </div>
         <ul className="rows">
-          {overview.byProvider.map((p) => (
+          {overview.byProvider.slice(0, 3).map((p) => (
             <li key={`${p.provider}|${p.model}`}>
               <span
                 className="row-chip"
@@ -400,8 +408,9 @@ export function TeamTab({ settings, dashboardUrl }: {
           <h3>Active nodes</h3>
         </div>
         <ul className="rows">
-          {overview.nodes.map((n) => (
+          {overview.nodes.slice(0, 3).map((n) => (
             <li key={n.nodeId}>
+              <span className="row-chip neutral" />
               <span className="row-label" title={n.nodeId}>
                 {n.displayName ?? `${n.nodeId.slice(0, 8)}…`}
                 {n.platform !== null && <span className="mono small"> · {n.platform}</span>}

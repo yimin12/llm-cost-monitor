@@ -13,6 +13,10 @@ const PORT = Number(process.env['LCM_SERVER_PORT'] ?? 4_017)
 const BIND = process.env['LCM_SERVER_BIND'] ?? '127.0.0.1'
 const MIGRATIONS_DIR =
   process.env['LCM_SERVER_MIGRATIONS_DIR'] ?? resolve(__dirname, '../server-migrations')
+// Cap on distinct devices (node_id) per (team, user). Operators can lift
+// this for paid teams via env without a code change. NaN / non-positive
+// values fall back to the TeamService default (5).
+const MAX_DEVICES_PER_USER = Number(process.env['LCM_MAX_DEVICES_PER_USER'])
 
 async function main(): Promise<void> {
   const pool = openPool()
@@ -32,7 +36,19 @@ async function main(): Promise<void> {
   }
   const authorize = createAuthorizer(authCfg)
 
-  const service = new TeamService(pool)
+  const service = new TeamService(
+    pool,
+    Number.isFinite(MAX_DEVICES_PER_USER) && MAX_DEVICES_PER_USER > 0
+      ? { maxDevicesPerUser: MAX_DEVICES_PER_USER }
+      : {},
+  )
+  console.log(
+    `[server] device limit per user: ${
+      Number.isFinite(MAX_DEVICES_PER_USER) && MAX_DEVICES_PER_USER > 0
+        ? MAX_DEVICES_PER_USER
+        : 5
+    }`,
+  )
   const app = createApp({
     service,
     authorize,

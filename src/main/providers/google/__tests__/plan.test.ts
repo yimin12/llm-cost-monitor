@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -213,5 +213,63 @@ describe('detectGooglePlan', () => {
     const plan = await detectGooglePlan({ geminiHome: dir, env: {}, fetchImpl })
     expect(plan.authMode).toBe('oauth')
     expect(plan.planName).toBe('Google Account')
+  })
+
+  it('uses the cached last-known-good plan when Code Assist 401s', async () => {
+    const idToken = fakeJwt({ email: 'g@example.com' })
+    await writeFile(
+      join(dir, 'oauth_creds.json'),
+      JSON.stringify({ access_token: 'expired', id_token: idToken }),
+    )
+    const cachePath = join(dir, 'google-plan-cache.json')
+    const detectedAt = Date.UTC(2026, 4, 11, 10, 0, 0)
+    const now = Date.UTC(2026, 4, 11, 12, 0, 0) // 2h after the save
+    await writeFile(
+      cachePath,
+      JSON.stringify({ tier: 'Pro', isPaid: true, email: 'g@example.com', detectedAt }),
+    )
+
+    const fetchImpl = (async () =>
+      new Response('Unauthorized', { status: 401 })) as unknown as typeof fetch
+
+    const plan = await detectGooglePlan({
+      geminiHome: dir,
+      env: {},
+      fetchImpl,
+      cachePath,
+      now: () => now,
+    })
+
+    // Cache held a paid tier; surface as subscription Pro instead of
+    // sliding back to "Google Account".
+    expect(plan.authMode).toBe('subscription')
+    expect(plan.planName).toBe('Pro')
+    expect(plan.source).toContain('cached 2h ago')
+  })
+
+  it('writes the cache after a successful Code Assist detection', async () => {
+    const idToken = fakeJwt({ email: 'g@example.com' })
+    await writeFile(
+      join(dir, 'oauth_creds.json'),
+      JSON.stringify({ access_token: 'tok', id_token: idToken }),
+    )
+    const cachePath = join(dir, 'google-plan-cache.json')
+    const fetchImpl = mockFetchJson({
+      paidTier: { name: 'Gemini Code Assist in Google One AI Pro' },
+    })
+
+    await detectGooglePlan({
+      geminiHome: dir,
+      env: {},
+      fetchImpl,
+      cachePath,
+    })
+
+    const raw = JSON.parse(await readFile(cachePath, 'utf8')) as {
+      tier: string
+      isPaid: boolean
+    }
+    expect(raw.tier).toBe('Pro')
+    expect(raw.isPaid).toBe(true)
   })
 })

@@ -317,7 +317,12 @@ export class Aggregator {
   }
 
   // Per-provider month-end forecast. Mirrors `forecast` but partitioned by
-  // provider — only providers with ≥3 active days in the month appear.
+  // provider — every provider with any MTD spend appears, even one-day
+  // newcomers. The linear projection gets noisier with <3 data points but
+  // dropping providers from the breakdown entirely (the old ≥3-day rule)
+  // confused users into thinking we'd lost their Codex / Gemini / Cursor
+  // data. The confidenceBand widens organically for under-determined
+  // providers, which already signals the noise.
   async forecastByProvider(now: Date = new Date()): Promise<Record<string, MonthlyForecast>> {
     const monthStart = startOfMonthMs(now)
     const todayStart = startOfDayMs(now)
@@ -328,7 +333,7 @@ export class Aggregator {
 
     const out: Record<string, MonthlyForecast> = {}
     for (const [provider, perDay] of byProvider) {
-      if (perDay.length < 3) continue
+      if (perDay.length === 0) continue
       let spent = 0n
       for (const c of perDay) spent += c
       const estimate =

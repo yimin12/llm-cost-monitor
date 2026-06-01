@@ -50,8 +50,22 @@ export class TeamServiceError extends Error {
   }
 }
 
+export interface TeamServiceOptions {
+  // Hard cap on the number of distinct nodes (devices) per (team, user).
+  // The cap is enforced on batchUpsert when a *new* node tries to upload;
+  // existing nodes for that user keep working regardless of the limit. Set
+  // via LCM_MAX_DEVICES_PER_USER in server/index.ts; tests pass directly.
+  // Default 5 — matches the product spec; per-team override can be added
+  // later by reading from the teams table.
+  maxDevicesPerUser?: number
+}
+
 export class TeamService {
-  constructor(private readonly pool: Pool) {}
+  private readonly maxDevicesPerUser: number
+
+  constructor(private readonly pool: Pool, opts: TeamServiceOptions = {}) {
+    this.maxDevicesPerUser = opts.maxDevicesPerUser ?? 5
+  }
 
   async ensureTeam(teamId: string, name?: string): Promise<void> {
     await this.pool.query(
@@ -230,6 +244,26 @@ export class TeamService {
     const batchNow = BigInt(Date.now())
     const touchedNodes = new Set<string>()
 
+    // Per-(team, user) node set, hydrated lazily then mutated inside the
+    // batch. Existing nodes don't count against the limit (a user can
+    // re-upload from a known device forever); only the (limit+1)th
+    // distinct node_id gets rejected.
+    const userNodeSets = new Map<string, Set<string>>()
+    const maxDevices = this.maxDevicesPerUser
+    const loadUserNodes = async (userId: string): Promise<Set<string>> => {
+      const k = `${teamId}|${userId}`
+      let s = userNodeSets.get(k)
+      if (s === undefined) {
+        const r = await client.query<{ id: string }>(
+          `SELECT id FROM nodes WHERE team_id = $1 AND user_id = $2`,
+          [teamId, userId],
+        )
+        s = new Set(r.rows.map((row) => row.id))
+        userNodeSets.set(k, s)
+      }
+      return s
+    }
+
     // Roll up only the events that *actually got inserted* (skip dups +
     // conflicts so retries don't double-count). Keyed by the full PK of
     // event_daily_rollup. 500 same-day same-model events from one node
@@ -298,6 +332,21 @@ export class TeamService {
           continue
         }
 
+        // Device limit per (team, user). Existing nodes always pass; only
+        // the first event from a brand-new node when the user is already
+        // at the cap gets rejected. The set is loaded once per (team,
+        // user) per batch and mutated as new nodes are accepted, so a
+        // batch never exceeds the cap even when it contains payloads
+        // from multiple new nodes for the same user.
+        const userNodes = await loadUserNodes(p.user_id)
+        if (!userNodes.has(p.node_id) && userNodes.size >= maxDevices) {
+          rejected.push({
+            sync_event_id: idOf(p),
+            reason: `device_limit_exceeded — max ${maxDevices} devices per user`,
+          })
+          continue
+        }
+
         // Touch each unique node at most once per batch. 500 payloads from
         // one node collapse to one INSERT…ON CONFLICT instead of 500.
         const nodeKey = `${p.user_id}|${p.node_id}`
@@ -309,6 +358,7 @@ export class TeamService {
              ON CONFLICT (id) DO UPDATE SET last_seen_at = EXCLUDED.last_seen_at`,
             [p.node_id, p.user_id, teamId, batchNow],
           )
+          userNodes.add(p.node_id)
         }
 
         if (p.kind === 'event') {
@@ -525,7 +575,15 @@ export class TeamService {
   // and supported by usage_events_team_ts_idx.
   async getOverview(
     teamId: string,
-    opts: { requestingUserId?: string; windowMs?: number } = {},
+    opts: {
+      requestingUserId?: string
+      windowMs?: number
+      // Client's local midnight in millis. When provided, replaces the
+      // server's UTC-midnight boundary for "today" — a US user past their
+      // local midnight then sees `todayCostMicroUsd` reset alongside
+      // their local KPI tile instead of trailing it by several hours.
+      todayStartMs?: number
+    } = {},
   ): Promise<TeamOverview> {
     const windowMs = opts.windowMs ?? 30 * 24 * 3600_000
     const now = Date.now()
@@ -536,12 +594,17 @@ export class TeamService {
     // by a few hours of partial-day data on the trailing edge.
     const sinceDate = new Date(since).toISOString().slice(0, 10)
 
-    // Today window starts at the most recent UTC midnight. Cheap lower
-    // bound for the KPI 'cost today' card — pulse-style dashboard wants
-    // it without an extra round-trip.
-    const todayStart = new Date(now)
-    todayStart.setUTCHours(0, 0, 0, 0)
-    const todaySince = todayStart.getTime()
+    // Today window — defaults to UTC midnight, overridden by the caller's
+    // local midnight when supplied. Clamped to a sane recent range so a
+    // bogus client clock can't read events from years ago.
+    const utcMidnight = new Date(now)
+    utcMidnight.setUTCHours(0, 0, 0, 0)
+    const utcMidnightMs = utcMidnight.getTime()
+    const todaySince =
+      opts.todayStartMs !== undefined &&
+      Math.abs(opts.todayStartMs - utcMidnightMs) <= 24 * 3600_000
+        ? opts.todayStartMs
+        : utcMidnightMs
 
     // Members + their event totals + role/status. Joined against the
     // merged rollup so 30-day SUMs are over (users × nodes × models)
@@ -682,6 +745,51 @@ export class TeamService {
       [teamId, BigInt(todaySince)],
     )
 
+    // Per-user month-to-date — from the 1st of the current calendar month
+    // (UTC) to now, scoped to the requesting user across all their synced
+    // nodes. Drives the Overview tab's month-end forecast when team sync
+    // is on so the projection sees account-wide spend instead of just one
+    // Mac. Uses v_merged_daily so it stays off raw events for the (potentially
+    // 31-day-wide) window. Only computed when the caller has a userId —
+    // otherwise the field stays null and the renderer falls back to local.
+    const monthStartDate = new Date(now)
+    monthStartDate.setUTCDate(1)
+    monthStartDate.setUTCHours(0, 0, 0, 0)
+    const monthSinceDate = monthStartDate.toISOString().slice(0, 10)
+    let currentUserMonthCostMicroUsd: string | null = null
+    let currentUserMonthByProvider: TeamProviderUsage[] = []
+    if (opts.requestingUserId !== undefined && opts.requestingUserId.length > 0) {
+      const monthTotalRow = await this.pool.query<{ cost: bigint }>(
+        `SELECT COALESCE(SUM(cost_micro_usd), 0)::bigint AS cost
+         FROM v_merged_daily
+         WHERE team_id = $1 AND user_id = $2 AND date >= $3`,
+        [teamId, opts.requestingUserId, monthSinceDate],
+      )
+      currentUserMonthCostMicroUsd = (monthTotalRow.rows[0]?.cost ?? 0n).toString()
+
+      const monthProvRows = await this.pool.query<{
+        provider: string
+        model: string
+        cost: bigint
+        event_count: bigint
+      }>(
+        `SELECT provider, model,
+                COALESCE(SUM(cost_micro_usd), 0)::bigint AS cost,
+                COALESCE(SUM(event_count), 0)::bigint AS event_count
+         FROM v_merged_daily
+         WHERE team_id = $1 AND user_id = $2 AND date >= $3
+         GROUP BY provider, model
+         ORDER BY cost DESC`,
+        [teamId, opts.requestingUserId, monthSinceDate],
+      )
+      currentUserMonthByProvider = monthProvRows.rows.map((r) => ({
+        provider: r.provider,
+        model: r.model,
+        costMicroUsd: r.cost.toString(),
+        eventCount: Number(r.event_count),
+      }))
+    }
+
     const teamMeta = await this.getTeamMeta(teamId)
 
     // Active node = seen in the last 24h. Cheap, deterministic, and
@@ -705,6 +813,8 @@ export class TeamService {
       totalEventCount: Number(totalRow.rows[0]?.event_count ?? 0n),
       activeMembers,
       activeNodes,
+      currentUserMonthCostMicroUsd,
+      currentUserMonthByProvider,
       members,
       topProjects,
       byProvider,

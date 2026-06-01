@@ -79,8 +79,8 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke(IPC.SYNC_STATUS) as Promise<SyncStatus | null>,
   syncDrain: (): Promise<SyncStatus | null> =>
     ipcRenderer.invoke(IPC.SYNC_DRAIN) as Promise<SyncStatus | null>,
-  syncTeamOverview: (): Promise<TeamOverview | null> =>
-    ipcRenderer.invoke(IPC.SYNC_TEAM_OVERVIEW) as Promise<TeamOverview | null>,
+  syncTeamOverview: (windowMs?: number): Promise<TeamOverview | null> =>
+    ipcRenderer.invoke(IPC.SYNC_TEAM_OVERVIEW, windowMs) as Promise<TeamOverview | null>,
 
   // Admin-only management. Each returns a TeamManageResult; the renderer
   // toasts the error message when ok is false.

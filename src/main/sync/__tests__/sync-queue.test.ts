@@ -40,11 +40,15 @@ function makeEvent(over: Partial<UsageEvent> = {}): UsageEvent {
   }
 }
 
+// Shared config for tests that don't care about the cadence gate.
+// intervalMs=0 disables rate-limiting so back-to-back drain() calls in
+// one test still run. Cadence-specific tests override this explicitly.
 const cfg: DrainConfig = {
   enabled: true,
   teamId: 'team-A',
   userId: 'user-1',
   privacyLevel: 'redacted',
+  intervalMs: 0,
 }
 
 describe('SyncQueue', () => {
@@ -294,5 +298,136 @@ describe('SyncQueue', () => {
 
     const third = await queue.drain(cfg)
     expect(third.uploaded).toBe(0)
+  })
+
+  // ─── Daily sync cadence + force override ────────────────────────────
+
+  it('drain skips with rate_limited when interval has not elapsed since last sync', async () => {
+    let nowMs = 1_700_000_000_000
+    const transport: SyncTransport = {
+      batchUpsert: vi.fn(async (_t, payloads, _tok): Promise<BatchUpsertResponse> => ({
+        accepted: payloads.map((p: SyncPayload) =>
+          p.kind === 'event' ? p.sync_event_id : `${p.date}|${p.provider}|${p.model}`,
+        ),
+        duplicates: [],
+        rejected: [],
+        cursor: 1_700_000_000_000,
+      })),
+    }
+    const { queue, events } = makeQueue(transport, () => nowMs)
+    await events.upsertMany([makeEvent({ id: 'a', timestamp: 1_700_000_000_000 })])
+
+    const oneDay = 24 * 60 * 60 * 1000
+    const dailyCfg: DrainConfig = { ...cfg, intervalMs: oneDay }
+
+    // Cold start: gate is a no-op, drain runs.
+    const first = await queue.drain(dailyCfg)
+    expect(first.uploaded).toBe(1)
+    expect(first.skipped).toBeUndefined()
+
+    // Add a second pending event, advance clock by 1h (< 24h).
+    await events.upsertMany([makeEvent({ id: 'b', timestamp: 1_700_000_000_500 })])
+    nowMs += 60 * 60 * 1000
+    const blocked = await queue.drain(dailyCfg)
+    expect(blocked.skipped).toBe('rate_limited')
+    expect(blocked.uploaded).toBe(0)
+    expect(transport.batchUpsert).toHaveBeenCalledTimes(1)
+
+    // Advance past 24h → next drain runs.
+    nowMs += oneDay
+    const after = await queue.drain(dailyCfg)
+    expect(after.skipped).toBeUndefined()
+    expect(after.uploaded).toBe(1)
+  })
+
+  it('forceDrain bypasses the rate-limit gate', async () => {
+    let nowMs = 1_700_000_000_000
+    const transport: SyncTransport = {
+      batchUpsert: vi.fn(async (_t, payloads, _tok): Promise<BatchUpsertResponse> => ({
+        accepted: payloads.map((p: SyncPayload) =>
+          p.kind === 'event' ? p.sync_event_id : `${p.date}|${p.provider}|${p.model}`,
+        ),
+        duplicates: [],
+        rejected: [],
+        cursor: 1_700_000_000_000,
+      })),
+    }
+    const { queue, events } = makeQueue(transport, () => nowMs)
+    await events.upsertMany([makeEvent({ id: 'a', timestamp: 1_700_000_000_000 })])
+
+    const dailyCfg: DrainConfig = { ...cfg, intervalMs: 24 * 60 * 60 * 1000 }
+    await queue.drain(dailyCfg)                             // initial sync
+    // Advance clock 1s so the new event lands inside `between(cursor+1, now+1)`.
+    nowMs += 1_000
+    await events.upsertMany([makeEvent({ id: 'b', timestamp: nowMs })])
+
+    // Within the 24h interval — drain would skip, forceDrain must go.
+    const forced = await queue.forceDrain(dailyCfg)
+    expect(forced.skipped).toBeUndefined()
+    expect(forced.uploaded).toBe(1)
+    expect(transport.batchUpsert).toHaveBeenCalledTimes(2)
+  })
+
+  it('failed drain does NOT push the rate-limit window forward', async () => {
+    // If a sync fails, the user shouldn't have to wait another 24h to
+    // retry. The cadence gate keys off the last *successful* sync.
+    let nowMs = 1_700_000_000_000
+    let shouldFail = true
+    const transport: SyncTransport = {
+      batchUpsert: vi.fn(async (_t, payloads, _tok): Promise<BatchUpsertResponse> => {
+        if (shouldFail) throw new TransportError('server', 'boom', 503)
+        return {
+          accepted: payloads.map((p: SyncPayload) =>
+            p.kind === 'event' ? p.sync_event_id : `${p.date}|${p.provider}|${p.model}`,
+          ),
+          duplicates: [],
+          rejected: [],
+          cursor: 1_700_000_000_000,
+        }
+      }),
+    }
+    const { queue, events } = makeQueue(transport, () => nowMs)
+    await events.upsertMany([makeEvent({ id: 'a', timestamp: 1_700_000_000_000 })])
+
+    const dailyCfg: DrainConfig = { ...cfg, intervalMs: 24 * 60 * 60 * 1000 }
+    const failed = await queue.drain(dailyCfg)
+    expect(failed.error).toMatch(/server: boom/)
+
+    // 1 second later, retry — gate must NOT block (no successful sync yet).
+    nowMs += 1_000
+    shouldFail = false
+    const retry = await queue.drain(dailyCfg)
+    expect(retry.skipped).toBeUndefined()
+    expect(retry.uploaded).toBe(1)
+  })
+
+  it('getStatus surfaces nextSyncAt = lastSyncAt + intervalMs', async () => {
+    let nowMs = 1_700_000_000_000
+    const transport: SyncTransport = {
+      batchUpsert: vi.fn(async (_t, payloads, _tok): Promise<BatchUpsertResponse> => ({
+        accepted: payloads.map((p: SyncPayload) =>
+          p.kind === 'event' ? p.sync_event_id : `${p.date}|${p.provider}|${p.model}`,
+        ),
+        duplicates: [],
+        rejected: [],
+        cursor: 1_700_000_000_000,
+      })),
+    }
+    const { queue, events } = makeQueue(transport, () => nowMs)
+    await events.upsertMany([makeEvent({ id: 'a', timestamp: 1_700_000_000_000 })])
+
+    const oneDay = 24 * 60 * 60 * 1000
+    const dailyCfg: DrainConfig = { ...cfg, intervalMs: oneDay }
+
+    // Cold: nextSyncAt is null because nothing's been synced yet.
+    const cold = await queue.getStatus(dailyCfg)
+    expect(cold.lastSyncAt).toBeNull()
+    expect(cold.nextSyncAt).toBeNull()
+
+    // After one drain, nextSyncAt is well-defined.
+    await queue.drain(dailyCfg)
+    const warm = await queue.getStatus(dailyCfg)
+    expect(warm.lastSyncAt).toBe(nowMs)
+    expect(warm.nextSyncAt).toBe(nowMs + oneDay)
   })
 })

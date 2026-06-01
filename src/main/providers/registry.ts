@@ -13,6 +13,11 @@ export interface ProviderRegistryDeps {
   pricing: PricingTable
   events: EventRepository
   fileCache: FileCache
+  // Provider-specific runtime state. `googlePlanCachePath` points at a
+  // small JSON file (typically `<userData>/google-plan-cache.json`) where
+  // detectGooglePlan persists the last-known-good tier — keeps the chip
+  // stable across the Gemini CLI's ~1-hour token expiry windows.
+  googlePlanCachePath?: string | null
 }
 
 export interface ProviderInfo {
@@ -32,7 +37,7 @@ export class ProviderRegistry {
     this.providers = [
       new AnthropicProvider(deps),
       new OpenAIProvider(deps),
-      new GoogleProvider(deps),
+      new GoogleProvider({ ...deps, planCachePath: deps.googlePlanCachePath ?? null }),
       new CursorProvider(deps),
     ]
   }

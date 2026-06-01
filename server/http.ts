@@ -103,9 +103,37 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: RouteCtx):
       sendJson(res, 401, { error: 'unauthenticated' })
       return
     }
+    // Optional `todayStartMs` query — the client's local midnight in
+    // millis. Lets the server's "today" boundary track the client's
+    // timezone instead of always splitting on UTC midnight, which
+    // otherwise leaves US users with an Account-today tile that lags
+    // their Today KPI by several hours after their local midnight.
+    let clientTodayStartMs: number | undefined
+    const queryStr = usageMatch[2]
+    if (queryStr !== undefined && queryStr.length > 1) {
+      const params = new URLSearchParams(queryStr.slice(1))
+      const raw = params.get('todayStartMs')
+      if (raw !== null) {
+        const parsed = Number(raw)
+        if (Number.isFinite(parsed) && parsed > 0) {
+          clientTodayStartMs = Math.floor(parsed)
+        }
+      }
+    }
     try {
+      // Optional ?window=<ms> overrides the default 30-day rollup window.
+      // Clamp to [1h, 1y] so a typo can't ask for nanosecond windows or
+      // multi-decade scans.
+      const qs = new URL(url, 'http://host').searchParams
+      const rawWindow = qs.get('window')
+      const parsedWindow = rawWindow !== null ? Number(rawWindow) : NaN
+      const windowMs = Number.isFinite(parsedWindow) && parsedWindow > 0
+        ? Math.min(Math.max(parsedWindow, 60 * 60_000), 365 * 24 * 60 * 60_000)
+        : undefined
       const overview = await ctx.service.getOverview(teamId, {
         requestingUserId: auth.userId,
+        ...(clientTodayStartMs !== undefined ? { todayStartMs: clientTodayStartMs } : {}),
+        ...(windowMs !== undefined ? { windowMs } : {}),
       })
       sendJson(res, 200, overview)
     } catch (err) {
