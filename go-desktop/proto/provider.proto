@@ -1,0 +1,110 @@
+syntax = "proto3";
+
+package lcmbar.plugin;
+
+option go_package = "github.com/yimin12/llm-cost-monitor/go-desktop/proto";
+
+// ProviderPlugin — out-of-process provider implementations.
+service ProviderPlugin {
+  rpc Info(Empty) returns (ProviderInfo);
+  rpc FetchUsage(FetchRequest) returns (UsageSnapshot);
+  rpc IsConfigured(Empty) returns (ConfiguredResponse);
+}
+
+// ExtensionPlugin — out-of-process extensions that contribute UI panels
+// and/or CLI subcommands.
+service ExtensionPlugin {
+  rpc GetManifest(Empty) returns (PluginManifest);
+  rpc FetchData(DataRequest) returns (DataResponse);
+  rpc ExecuteAction(ActionRequest) returns (ActionResponse);
+  rpc ExecuteCLICommand(CLICommandRequest) returns (CLICommandResponse);
+  rpc GetSettings(Empty) returns (SettingsValues);
+  rpc SetSetting(SetSettingRequest) returns (SetSettingResponse);
+}
+
+message Empty {}
+
+message ProviderInfo {
+  string id = 1;
+  string display_name = 2;
+  string icon_path = 3;
+  string dashboard_url = 4;
+  bool supports_spend = 5;
+  bool supports_tokens = 6;
+  bool supports_usage_percent = 7;
+}
+
+message FetchRequest {
+  reserved 1;
+  reserved "timeout_seconds";
+}
+
+message UsageSnapshot {
+  string provider_id = 1;
+  double spend_usd = 2;
+  double budget_usd = 3;
+  string spend_unit = 4;
+  int64 tokens_used = 5;
+  int64 tokens_limit = 6;
+  double usage_percent = 7;
+  string fetched_at = 8;
+  string error_message = 9;
+  reserved 10;
+  reserved "is_stale";
+  string reset_at = 11;
+}
+
+message ConfiguredResponse {
+  bool configured = 1;
+}
+
+message PluginManifest {
+  string contributions_json = 1;
+}
+
+message DataRequest {
+  string source_id = 1;
+  string params_json = 2;
+}
+
+message DataResponse {
+  string data_json = 1;
+  string error = 2;
+}
+
+message ActionRequest {
+  string action_id = 1;
+  string params_json = 2;
+}
+
+message ActionResponse {
+  bool success = 1;
+  string message = 2;
+  string error = 3;
+}
+
+message SettingsValues {
+  string values_json = 1;
+}
+
+message SetSettingRequest {
+  string key = 1;
+  string value = 2;
+}
+
+message SetSettingResponse {
+  bool success = 1;
+  string error = 2;
+}
+
+message CLICommandRequest {
+  string command_name = 1;
+  repeated string args = 2;
+  string flags_json = 3;
+}
+
+message CLICommandResponse {
+  int32 exit_code = 1;
+  string stdout = 2;
+  string stderr = 3;
+}

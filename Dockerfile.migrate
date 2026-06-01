@@ -3,26 +3,28 @@
 # corresponding dev/CI/production database. Kept tiny on purpose:
 # only `prisma` is installed, no app source, no @prisma/client.
 #
-# Build context is the repo root so we can copy `prisma/`. We pin the
-# Prisma version to keep migrate output deterministic across
+# Build context is the repo root so we can copy `prisma/`. The Prisma
+# version is pinned to keep migrate output deterministic across
 # developer machines.
 
-FROM node:20-alpine
+ARG NODE_IMAGE=node:20.18.1-alpine
+FROM ${NODE_IMAGE}
 
-# Install only the prisma CLI. The container runs `prisma migrate deploy`
-# and exits — no long-running process, so global install is fine.
 ENV PRISMA_VERSION=6.19.3
 
-RUN apk add --no-cache openssl ca-certificates && \
-    npm install --global prisma@${PRISMA_VERSION}
+# tini reaps any spawned children before the migrate command exits.
+# openssl is required by Prisma's binary engines; ca-certificates lets
+# `prisma migrate deploy` reach https-protected schema mirrors.
+RUN apk add --no-cache tini openssl ca-certificates && \
+    npm install --global --no-audit --no-fund prisma@${PRISMA_VERSION} && \
+    npm cache clean --force
 
 WORKDIR /app
+COPY --chown=node:node prisma /app/prisma
 
-# Schemas + their tracked migration history. Mounting via compose at
-# runtime would also work, but baking them in lets us tag the migrate
-# image and run it in CI without the full repo.
-COPY prisma /app/prisma
+USER node
 
+ENTRYPOINT ["/sbin/tini", "--"]
 # Default to applying both schemas. Override by passing a different
-# command (e.g. `--schema prisma/server/schema.prisma`).
+# command (e.g. `prisma migrate deploy --schema prisma/server/schema.prisma`).
 CMD ["sh", "-c", "prisma migrate deploy --schema prisma/desktop/schema.prisma && prisma migrate deploy --schema prisma/server/schema.prisma"]

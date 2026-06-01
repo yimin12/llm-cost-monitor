@@ -125,8 +125,26 @@ export class EventRepository {
   constructor(private readonly pool: Pool) {}
 
   async upsert(event: UsageEvent): Promise<void> {
-    const q = namedQuery(UPSERT_SQL, eventToParams(event))
-    await this.pool.query(q.text, q.values)
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+      const q = namedQuery(UPSERT_SQL, eventToParams(event))
+      await client.query(q.text, q.values)
+      // Outbox: ON CONFLICT DO NOTHING — re-upserting the same event id
+      // (e.g. parser re-emitting a streaming chunk) must NOT enqueue a
+      // second copy. The unique index on event_id enforces this.
+      await client.query(
+        `INSERT INTO sync_outbox (event_id, enqueued_at)
+         VALUES ($1, $2) ON CONFLICT (event_id) DO NOTHING`,
+        [event.id, BigInt(Date.now())],
+      )
+      await client.query('COMMIT')
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {})
+      throw err
+    } finally {
+      client.release()
+    }
   }
 
   async upsertMany(events: readonly UsageEvent[]): Promise<void> {
@@ -134,9 +152,15 @@ export class EventRepository {
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
+      const enqueuedAt = BigInt(Date.now())
       for (const e of events) {
         const q = namedQuery(UPSERT_SQL, eventToParams(e))
         await client.query(q.text, q.values)
+        await client.query(
+          `INSERT INTO sync_outbox (event_id, enqueued_at)
+           VALUES ($1, $2) ON CONFLICT (event_id) DO NOTHING`,
+          [e.id, enqueuedAt],
+        )
       }
       await client.query('COMMIT')
     } catch (err) {

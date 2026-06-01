@@ -9,7 +9,7 @@ Open-source **macOS + Linux** tray app that tracks LLM token usage and cost acro
 - Reads on-disk session logs from **Claude Code** (`~/.claude/projects/`), **OpenAI Codex** (`~/.codex/sessions/`), and **Google Gemini** (`~/.gemini/tmp/*/chats/`).
 - Dedupes by message id (Claude), per-call last_token_usage (Codex), per-message id (Gemini).
 - Costs computed via 2,250-model LiteLLM pricing snapshot, integer micro-USD throughout.
-- **Dev branch (`feat/auth-gmail`):** event store is **Postgres 17 in Docker** (`127.0.0.1:5433`). Schema v1, BIGINT cost as JS bigint via `pg.types.setTypeParser`. `main` still on better-sqlite3.
+- **Storage:** **Postgres 17** in dev *and* shipped builds. Schema v1, BIGINT cost as JS bigint via `pg.types.setTypeParser`. The earlier "SQLite for shipped builds" plan is dropped — see [`docs/storage-decision.md`](./docs/storage-decision.md).
 - **Refresh** on app start + every 5 minutes + manual button.
 - **Team sync (opt-in, dev branch `feat/team-sync`)**: a Node/Postgres
   server in `server/` collects redacted projections of usage events
@@ -49,20 +49,22 @@ npm run db:reset   # nuke + recreate (destroys all stored events)
 npm run db:down    # stop, keep volume
 ```
 
-### Native module rebuild (better-sqlite3 — for shipped builds only)
+### Storage decision
 
-`better-sqlite3` is still the storage backend for **shipped binaries**
-(SQLite, no Docker dependency). Dev uses Postgres exclusively. The
-`rebuild:electron` / `rebuild:node` scripts are kept for the eventual
-shipped-build SQLite path.
+Postgres is the only event store, in both dev and shipped builds. The
+`better-sqlite3` dependency is **legacy** — it's still listed in
+`package.json` because `src/main/providers/cursor/credentials.ts` reads
+the **Cursor IDE's** SQLite store (not ours) for an auth token. It is
+not used for our event store. Rationale in
+[`docs/storage-decision.md`](./docs/storage-decision.md).
 
 > **Linux / GNOME note:** GNOME removed system-tray support. Install the [AppIndicator and KStatusNotifierItem Support](https://extensions.gnome.org/extension/615/appindicator-support/) extension. KDE Plasma, XFCE, Cinnamon, MATE, and LXQt work natively.
 
 ## Stack
 
-- **Electron + TypeScript** main process: parsers, SQLite, file watchers, providers.
+- **Electron + TypeScript** main process: parsers, file watchers, providers, Postgres-backed storage.
 - **React + Vite** renderer: the dropdown UI.
-- **`pg`** + Postgres 17 (dev) for storage; **`better-sqlite3`** kept for shipped builds; **vendored LiteLLM JSON** for pricing (2,250 models).
+- **`pg`** + Postgres 17 for storage (dev and shipped); **vendored LiteLLM JSON** for pricing (2,250 models). `better-sqlite3` is only used to read the Cursor IDE's own auth-token SQLite store.
 - **`electron-builder`** outputs: `.dmg` (macOS) + `.deb` and `.AppImage` (Linux).
 - **`electron-updater`** + GitHub Releases for auto-updates.
 

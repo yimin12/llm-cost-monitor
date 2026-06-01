@@ -5,10 +5,9 @@ import {
 } from '@shared/sync'
 import type { UsageEvent } from '@shared/usage-event'
 
-import type { EventRepository } from '../storage/event-repository'
-
 import type { CursorRepository } from './cursor-repository'
 import type { NodeIdentityRepository } from './node-identity'
+import type { OutboxRepository } from './outbox-repository'
 import { redactEvent, redactToDaily } from './redaction'
 import type { SyncTransport, TransportError } from './transport'
 
@@ -23,7 +22,7 @@ export const MAX_BATCH_SIZE = 500
 export const DEFAULT_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000
 
 export interface SyncQueueDeps {
-  events: EventRepository
+  outbox: OutboxRepository
   cursors: CursorRepository
   nodes: NodeIdentityRepository
   transport: SyncTransport
@@ -73,7 +72,7 @@ export interface DrainOutcome {
 // process schedules `drain()` via its existing setInterval / on-event
 // hooks. Easier to test, easier to reason about lifecycle.
 export class SyncQueue {
-  private readonly events: EventRepository
+  private readonly outbox: OutboxRepository
   private readonly cursors: CursorRepository
   private readonly nodes: NodeIdentityRepository
   private readonly transport: SyncTransport
@@ -89,7 +88,7 @@ export class SyncQueue {
   private lastSyncAt: number | null = null
 
   constructor(deps: SyncQueueDeps) {
-    this.events = deps.events
+    this.outbox = deps.outbox
     this.cursors = deps.cursors
     this.nodes = deps.nodes
     this.transport = deps.transport
@@ -112,15 +111,15 @@ export class SyncQueue {
       }
     }
     const cursor = await this.cursors.get(cfg.teamId, cfg.userId)
-    const cursorMs = cursor?.lastAcknowledgedTimestampMs ?? 0
-    const pending = await this.events.between(cursorMs + 1, this.now() + 1)
+    const lastSeq = cursor?.lastSentSeq ?? 0n
+    const pendingCount = await this.outbox.pendingCount(lastSeq)
     const lastSyncAt = cursor?.lastSyncedAt ?? this.lastSyncAt
     return {
       configured: true,
       enabled: true,
       lastSyncAt,
       nextSyncAt: lastSyncAt === null ? null : lastSyncAt + intervalMs,
-      pendingCount: pending.length,
+      pendingCount,
       lastError: cursor?.lastError ?? this.lastError,
       nodeId: node.nodeId,
     }
@@ -172,14 +171,16 @@ export class SyncQueue {
 
     const node = await this.nodes.ensure()
     const cursor = cursorPeek
-    const cursorMs = cursor?.lastAcknowledgedTimestampMs ?? 0
+    const lastSeq = cursor?.lastSentSeq ?? 0n
 
-    // Pull a window of pending events. We use `between(cursor+1, now+1)`
-    // so multiple events with identical timestamps still get picked up
-    // (the server dedupes by sync_event_id in any case).
-    const allPending = await this.events.between(cursorMs + 1, this.now() + 1)
-    const pending = allPending.slice(0, MAX_BATCH_SIZE)
-    if (pending.length === 0) return { ...empty, initialPending: 0 }
+    // Pull the next batch from the outbox. seq is monotonic and unique,
+    // so MAX_BATCH_SIZE caps don't drop same-timestamp tail events.
+    const rows = await this.outbox.pending(lastSeq, MAX_BATCH_SIZE)
+    if (rows.length === 0) return empty
+
+    const pending: UsageEvent[] = rows.map((r) => r.event)
+    const maxSeq = rows[rows.length - 1]!.seq
+    const initialPending = await this.outbox.pendingCount(lastSeq)
 
     const ctx = {
       teamId: cfg.teamId,
@@ -199,19 +200,25 @@ export class SyncQueue {
     const token = await this.getAccessToken()
     try {
       const res = await this.transport.batchUpsert(cfg.teamId, payloads, token)
-      // High-water mark: max timestamp across the batch we sent. If the
-      // server only acked a subset, we still advance — rejected ids are
-      // recorded in the audit log and won't be retried.
+      // Watermarks:
+      //   - seq advances to the largest seq in the batch. Same-millisecond
+      //     bursts that overflow a batch still progress because seq is
+      //     unique and gap-free.
+      //   - The legacy timestamp cursor is advanced to the max event ts
+      //     in the batch for observability only — the queue no longer
+      //     reads from it.
       const maxTs = pending.reduce(
         (m: number, e: UsageEvent) => (e.timestamp > m ? e.timestamp : m),
-        cursorMs,
+        cursor?.lastAcknowledgedTimestampMs ?? 0,
       )
-      this.lastSyncAt = this.now()
+      const sentAt = this.now()
+      await this.outbox.markSent(maxSeq, sentAt)
+      await this.cursors.advance(cfg.teamId, cfg.userId, maxSeq, maxTs, sentAt)
+      this.lastSyncAt = sentAt
       this.lastError = null
-      await this.cursors.advance(cfg.teamId, cfg.userId, maxTs, this.now())
 
       return {
-        initialPending: allPending.length,
+        initialPending,
         uploaded: payloads.length,
         accepted: res.accepted.length,
         duplicates: res.duplicates.length,
@@ -224,10 +231,9 @@ export class SyncQueue {
       const msg = `${e.kind ?? 'unknown'}: ${e.message}`
       this.lastError = msg
       await this.cursors.recordError(cfg.teamId, cfg.userId, msg)
-      // Retryable errors leave the cursor alone — next drain re-tries the
-      // same batch. Non-retryable errors also leave the cursor alone but
-      // the operator must intervene (re-auth, fix server URL, etc.).
-      return { ...empty, initialPending: allPending.length, error: msg }
+      // Retryable errors leave the seq cursor alone — next drain re-pulls
+      // the same outbox rows.
+      return { ...empty, initialPending, error: msg }
     }
   }
 }

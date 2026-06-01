@@ -8,6 +8,7 @@ import { EventRepository } from '../../storage/event-repository'
 import { createTestDatabase, dropTestDatabase } from '../../storage/__tests__/test-helpers'
 import { CursorRepository } from '../cursor-repository'
 import { NodeIdentityRepository } from '../node-identity'
+import { OutboxRepository } from '../outbox-repository'
 import { SyncQueue, type DrainConfig } from '../sync-queue'
 import type { SyncTransport } from '../transport'
 import { TransportError } from '../transport'
@@ -67,6 +68,7 @@ describe('SyncQueue', () => {
   beforeEach(async () => {
     await pool.query('DELETE FROM sync_audit')
     await pool.query('DELETE FROM sync_cursor')
+    await pool.query('DELETE FROM sync_outbox')
     await pool.query('DELETE FROM events')
     await pool.query('DELETE FROM local_node')
   })
@@ -74,16 +76,17 @@ describe('SyncQueue', () => {
   function makeQueue(transport: SyncTransport, now: () => number = () => 1_800_000_000_000) {
     const events = new EventRepository(pool)
     const cursors = new CursorRepository(pool)
+    const outbox = new OutboxRepository(pool)
     const nodes = new NodeIdentityRepository(pool, { newId: () => 'node-test', now })
     const queue = new SyncQueue({
-      events,
+      outbox,
       cursors,
       nodes,
       transport,
       getAccessToken: async () => 'token-xyz',
       now,
     })
-    return { queue, events, cursors, nodes }
+    return { queue, events, cursors, outbox, nodes }
   }
 
   it('does nothing when sync is disabled', async () => {
@@ -264,6 +267,37 @@ describe('SyncQueue', () => {
     expect(status.enabled).toBe(false)
     expect(status.pendingCount).toBe(0)
     expect(status.nodeId).toBe('node-test')
+  })
+
+  // Regression: under the old timestamp-cursor strategy, a MAX_BATCH_SIZE
+  // cap landing inside a same-millisecond burst would advance the cursor
+  // past the burst, dropping the tail. With the outbox, seq is unique per
+  // row so the second drain still sees the remaining rows.
+  it('does not skip same-millisecond events at a batch boundary', async () => {
+    const transport: SyncTransport = {
+      batchUpsert: vi.fn(async (_t, payloads): Promise<BatchUpsertResponse> => ({
+        accepted: payloads.map((p: SyncPayload) => (p.kind === 'event' ? p.sync_event_id : 'd')),
+        duplicates: [],
+        rejected: [],
+        cursor: 0,
+      })),
+    }
+    const { queue, events } = makeQueue(transport)
+    // 600 events, ALL with the same timestamp.
+    const evs: UsageEvent[] = []
+    for (let i = 0; i < 600; i++) {
+      evs.push(makeEvent({ id: `e${i}`, timestamp: 1_700_000_000_000 }))
+    }
+    await events.upsertMany(evs)
+
+    const first = await queue.drain(cfg)
+    expect(first.uploaded).toBe(500)
+
+    const second = await queue.drain(cfg)
+    expect(second.uploaded).toBe(100)
+
+    const third = await queue.drain(cfg)
+    expect(third.uploaded).toBe(0)
   })
 
   // ─── Daily sync cadence + force override ────────────────────────────

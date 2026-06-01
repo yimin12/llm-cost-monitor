@@ -1,7 +1,8 @@
 import { resolve } from 'node:path'
 
+import { configFromEnv, createAuthorizer } from './auth'
 import { openPool, runServerMigrations } from './db'
-import { createApp, defaultAuthorize } from './http'
+import { createApp } from './http'
 import { TeamService } from './team-service'
 
 const PORT = Number(process.env['LCM_SERVER_PORT'] ?? 4_017)
@@ -25,6 +26,16 @@ async function main(): Promise<void> {
       (status.ranThisRun.length > 0 ? ` (ran ${status.ranThisRun.join(',')})` : ''),
   )
 
+  const authCfg = configFromEnv()
+  if (authCfg.mode === 'insecure-noverify') {
+    console.warn(
+      '[server] WARNING: LCM_SERVER_AUTH=insecure-noverify — JWTs are decoded without ' +
+        'signature verification. Use only for local development. Production must set ' +
+        'LCM_SERVER_AUTH=jwks and LCM_SERVER_AUDIENCE=<desktop oauth client_id>.',
+    )
+  }
+  const authorize = createAuthorizer(authCfg)
+
   const service = new TeamService(
     pool,
     Number.isFinite(MAX_DEVICES_PER_USER) && MAX_DEVICES_PER_USER > 0
@@ -40,7 +51,7 @@ async function main(): Promise<void> {
   )
   const app = createApp({
     service,
-    authorize: defaultAuthorize,
+    authorize,
     log: (line) => console.log(`[server] ${line}`),
   })
 

@@ -1,0 +1,47 @@
+# Keep the build context tiny so `docker build` is fast and reproducible.
+# Anything not listed below as an explicit COPY in a Dockerfile should be
+# excluded here.
+
+# Node + Electron build outputs
+node_modules
+out
+out-server
+dist
+.electron-vite-cache
+.eslintcache
+.cache
+
+# Tests + IDE detritus — never needed in a server image
+coverage
+.nyc_output
+**/*.test.ts
+**/*.spec.ts
+.vscode
+.idea
+.DS_Store
+
+# Local dev DBs and test artifacts
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+.env
+.env.local
+.env.*.local
+
+# Source control
+.git
+.github
+.gitignore
+
+# Renderer-only assets the server doesn't need. (Dockerfile.server only
+# COPYs the bits it actually compiles, so this is defense-in-depth.)
+build
+resources/icons
+
+# Documentation noise
+docs
+research
+*.md
+!server/**/*.md
+!resources/pricing.json

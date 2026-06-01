@@ -45,8 +45,9 @@ describe('AuthRepository (Postgres)', () => {
     // Bump this when a new migration lands. Currently:
     //   v1 = events/files/pricing_overrides, v2 = auth_user,
     //   v3 = alerts, v4 = team-sync (local_node + sync_cursor + sync_audit),
-    //   v5 = downgrade memory alerts to soft-warning state
-    expect(r.rows[0]?.max).toBe(5)
+    //   v5 = downgrade memory alerts to soft-warning state,
+    //   v6 = sync_outbox (BIGSERIAL queue + last_sent_seq cursor)
+    expect(r.rows[0]?.max).toBe(6)
   })
 
   it('upsertActive + findActive round-trip', async () => {

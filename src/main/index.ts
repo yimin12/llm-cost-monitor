@@ -26,6 +26,7 @@ import { FileCache } from './storage/file-cache'
 import { runMigrations } from './storage/migrations'
 import { CursorRepository } from './sync/cursor-repository'
 import { NodeIdentityRepository } from './sync/node-identity'
+import { OutboxRepository } from './sync/outbox-repository'
 import { SyncQueue } from './sync/sync-queue'
 import { HttpSyncTransport } from './sync/transport'
 import {
@@ -198,7 +199,7 @@ async function updateTrayPresentation(): Promise<void> {
   // any extra label would be redundant. When all clear, the cost takes
   // the slot. Linux still spells it out in the tooltip since it has no
   // icon-swap visual signal to lean on.
-  const title = hasAlerts ? String(openCount) : cost
+  const title = hasAlerts ? `⚠ ${openCount}` : `💰 ${cost}`
   if (process.platform === 'darwin') {
     tray.setTitle(title)
   } else {
@@ -219,8 +220,11 @@ void app.whenReady().then(async () => {
     `pricing snapshot ${pricing.snapshotVersion}, ${pricing.modelCount} models loaded`,
   )
 
-  // Postgres-in-Docker (dev) — see docs/auth-plan.md §3 + docker-compose.yml.
-  // Shipped builds will swap in a SQLite implementation in a later slice.
+  // Storage is Postgres in BOTH dev and shipped builds. The earlier
+  // README mention of a SQLite swap is no longer planned — see
+  // docs/storage-decision.md for the rationale. Shipped builds bundle
+  // an embedded Postgres (or point at a user-managed instance via
+  // DATABASE_URL); they do NOT fall back to SQLite.
   try {
     pool = await openPool({})
   } catch (err) {
@@ -287,12 +291,12 @@ void app.whenReady().then(async () => {
   })
   await nodes.ensure()
   const cursors = new CursorRepository(pool)
-  const eventsRepo = events
+  const outbox = new OutboxRepository(pool)
   const buildSyncQueue = (): SyncQueue | null => {
     const url = settings.effectiveSyncUrl()
     if (url === null) return null
     return new SyncQueue({
-      events: eventsRepo,
+      outbox,
       cursors,
       nodes,
       transport: new HttpSyncTransport({ baseUrl: url }),
@@ -386,10 +390,7 @@ void app.whenReady().then(async () => {
     `tray registered (icon empty=${baseTrayIcon.isEmpty()}, size=${JSON.stringify(baseTrayIcon.getSize())})`,
   )
   if (process.platform === 'darwin') {
-    tray.setTitle('$0.00')
-    // Setting activation policy *after* Tray creation. Calling dock.hide()
-    // (or transitioning to accessory) before the Tray exists can suppress
-    // the menubar icon on macOS.
+    tray.setTitle('💰 LCM $0.00')
     app.setActivationPolicy('accessory')
   } else {
     tray.setToolTip('devbar')

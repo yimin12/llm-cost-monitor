@@ -80,7 +80,8 @@ describe('usage monitoring workflow (Postgres)', () => {
   })
 
   beforeEach(async () => {
-    await pool.query('TRUNCATE TABLE events')
+    // CASCADE because sync_outbox has a FK on events.id (slice 6).
+    await pool.query('TRUNCATE TABLE events CASCADE')
   })
 
   it('parses Claude, Codex, Gemini, and local token usage into product aggregates', async () => {

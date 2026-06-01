@@ -22,6 +22,7 @@ import {
 import { EventRepository } from '../../src/main/storage/event-repository'
 import { CursorRepository } from '../../src/main/sync/cursor-repository'
 import { NodeIdentityRepository } from '../../src/main/sync/node-identity'
+import { OutboxRepository } from '../../src/main/sync/outbox-repository'
 import { SyncQueue } from '../../src/main/sync/sync-queue'
 import { HttpSyncTransport } from '../../src/main/sync/transport'
 
@@ -107,11 +108,12 @@ describe('end-to-end acceptance (plan.md Phase 5)', () => {
   }) {
     const cli = await createClientDb()
     const events = new EventRepository(cli.pool)
+    const outbox = new OutboxRepository(cli.pool)
     const cursors = new CursorRepository(cli.pool)
     const nodes = new NodeIdentityRepository(cli.pool, { newId: () => opts.nodeId })
     await nodes.ensure()
     const queue = new SyncQueue({
-      events,
+      outbox,
       cursors,
       nodes,
       transport: new HttpSyncTransport({ baseUrl }),
