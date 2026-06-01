@@ -44,6 +44,16 @@ export class AuthService {
         `auth: GCP credentials loaded (client_id starts with ${this.secrets.gcpClientId.slice(0, 8)}…, secret: ${this.secrets.gcpClientSecret === null ? 'none' : 'yes'}, source: ${this.secrets.source})`,
       )
     }
+    const devOverride = process.env['LCM_DEV_BEARER_OVERRIDE']
+    if (typeof devOverride === 'string' && devOverride.length > 0) {
+      const preview =
+        devOverride.length <= 12 ? devOverride : `${devOverride.slice(0, 8)}…(${devOverride.length} chars)`
+      console.warn(
+        `auth: ⚠ DEV BYPASS ACTIVE — LCM_DEV_BEARER_OVERRIDE set to "${preview}". ` +
+          'Sync uploads will use this string as the bearer; Google OAuth is skipped. ' +
+          'Unset the env var to restore normal flow.',
+      )
+    }
   }
 
   get isConfigured(): boolean {
@@ -187,7 +197,20 @@ export class AuthService {
   // Bearer ...` to the team-sync backend, or null if the user isn't signed
   // in. We refresh proactively if the cached token has < 60s of validity
   // left so callers don't need to retry on 401.
+  //
+  // Dev-mode bypass: LCM_DEV_BEARER_OVERRIDE short-circuits to the env value
+  // as the bearer. Useful for local-instance smoke tests where you don't
+  // want to round-trip Google OAuth (e.g. a worktree dev box that the
+  // server treats as the same user as another, already-signed-in machine).
+  // The override only applies in development — packaged production builds
+  // ignore process.env per electron-builder's stripped runtime — and the
+  // server's permissive v1 Authorizer must still accept the resulting
+  // bearer (its userId becomes whatever the env value decodes to).
   async accessTokenForSync(): Promise<string | null> {
+    const devOverride = process.env['LCM_DEV_BEARER_OVERRIDE']
+    if (typeof devOverride === 'string' && devOverride.length > 0) {
+      return devOverride
+    }
     if (this.state.kind !== 'signed-in' || this.session === null) return null
     const now = Date.now()
     if (this.session.accessTokenExpiresAt - now > 60_000) {

@@ -50,8 +50,22 @@ export class TeamServiceError extends Error {
   }
 }
 
+export interface TeamServiceOptions {
+  // Hard cap on the number of distinct nodes (devices) per (team, user).
+  // The cap is enforced on batchUpsert when a *new* node tries to upload;
+  // existing nodes for that user keep working regardless of the limit. Set
+  // via LCM_MAX_DEVICES_PER_USER in server/index.ts; tests pass directly.
+  // Default 5 — matches the product spec; per-team override can be added
+  // later by reading from the teams table.
+  maxDevicesPerUser?: number
+}
+
 export class TeamService {
-  constructor(private readonly pool: Pool) {}
+  private readonly maxDevicesPerUser: number
+
+  constructor(private readonly pool: Pool, opts: TeamServiceOptions = {}) {
+    this.maxDevicesPerUser = opts.maxDevicesPerUser ?? 5
+  }
 
   async ensureTeam(teamId: string, name?: string): Promise<void> {
     await this.pool.query(
@@ -230,6 +244,26 @@ export class TeamService {
     const batchNow = BigInt(Date.now())
     const touchedNodes = new Set<string>()
 
+    // Per-(team, user) node set, hydrated lazily then mutated inside the
+    // batch. Existing nodes don't count against the limit (a user can
+    // re-upload from a known device forever); only the (limit+1)th
+    // distinct node_id gets rejected.
+    const userNodeSets = new Map<string, Set<string>>()
+    const maxDevices = this.maxDevicesPerUser
+    const loadUserNodes = async (userId: string): Promise<Set<string>> => {
+      const k = `${teamId}|${userId}`
+      let s = userNodeSets.get(k)
+      if (s === undefined) {
+        const r = await client.query<{ id: string }>(
+          `SELECT id FROM nodes WHERE team_id = $1 AND user_id = $2`,
+          [teamId, userId],
+        )
+        s = new Set(r.rows.map((row) => row.id))
+        userNodeSets.set(k, s)
+      }
+      return s
+    }
+
     // Roll up only the events that *actually got inserted* (skip dups +
     // conflicts so retries don't double-count). Keyed by the full PK of
     // event_daily_rollup. 500 same-day same-model events from one node
@@ -298,6 +332,21 @@ export class TeamService {
           continue
         }
 
+        // Device limit per (team, user). Existing nodes always pass; only
+        // the first event from a brand-new node when the user is already
+        // at the cap gets rejected. The set is loaded once per (team,
+        // user) per batch and mutated as new nodes are accepted, so a
+        // batch never exceeds the cap even when it contains payloads
+        // from multiple new nodes for the same user.
+        const userNodes = await loadUserNodes(p.user_id)
+        if (!userNodes.has(p.node_id) && userNodes.size >= maxDevices) {
+          rejected.push({
+            sync_event_id: idOf(p),
+            reason: `device_limit_exceeded — max ${maxDevices} devices per user`,
+          })
+          continue
+        }
+
         // Touch each unique node at most once per batch. 500 payloads from
         // one node collapse to one INSERT…ON CONFLICT instead of 500.
         const nodeKey = `${p.user_id}|${p.node_id}`
@@ -309,6 +358,7 @@ export class TeamService {
              ON CONFLICT (id) DO UPDATE SET last_seen_at = EXCLUDED.last_seen_at`,
             [p.node_id, p.user_id, teamId, batchNow],
           )
+          userNodes.add(p.node_id)
         }
 
         if (p.kind === 'event') {

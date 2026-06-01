@@ -78,12 +78,14 @@ function teamSyncFromSettings(s: AppSettings): {
   teamId: string | null
   userId: string | null
   privacyLevel: TeamSyncSettings['privacyLevel']
+  intervalMs: number
 } {
   return {
     enabled: s.teamSync.enabled,
     teamId: s.teamSync.teamId,
     userId: s.teamSync.userId,
     privacyLevel: s.teamSync.privacyLevel,
+    intervalMs: s.teamSync.intervalMs,
   }
 }
 
@@ -127,7 +129,11 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   })
   ipcMain.handle(IPC.SYNC_DRAIN, async (): Promise<SyncStatus | null> => {
     if (deps.syncQueue === null) return null
-    await deps.syncQueue.drain(teamSyncFromSettings(deps.settings.get()))
+    // SYNC_DRAIN is wired to the renderer's "Sync Now" button — an
+    // explicit user action that must run even when the daily-cadence
+    // gate would otherwise block it. forceDrain() bypasses; scheduled
+    // background sync still goes through plain drain().
+    await deps.syncQueue.forceDrain(teamSyncFromSettings(deps.settings.get()))
     const status = await deps.syncQueue.getStatus(teamSyncFromSettings(deps.settings.get()))
     broadcastSyncStatusChanged(status)
     return status
