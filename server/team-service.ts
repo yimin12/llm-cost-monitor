@@ -497,6 +497,11 @@ export class TeamService {
       return 'conflict'
     }
 
+    // session_id / message_id are intentionally NOT persisted: the team
+    // view reports usage by *what* (provider/model), *project*, and *who*
+    // (user) only — session-level identifiers are too granular/identifying
+    // to keep server-side. The columns remain in the schema (nullable) so
+    // this stays reversible without a migration; we just write NULL.
     await client.query(
       `INSERT INTO usage_events (
          sync_event_id, team_id, user_id, node_id, local_event_id,
@@ -520,7 +525,7 @@ export class TeamService {
         p.sync_event_id, p.team_id, p.user_id, p.node_id, p.local_event_id,
         p.payload_hash, p.privacy_level,
         p.provider, p.provider_raw_tag, p.model, BigInt(p.timestamp),
-        p.project, p.project_hash, p.session_id, p.message_id,
+        p.project, p.project_hash, null, null,
         BigInt(p.input_tokens), BigInt(p.output_tokens), BigInt(p.cache_read_tokens),
         BigInt(p.cache_creation_5m_tokens), BigInt(p.cache_creation_1h_tokens),
         p.reasoning_tokens === null ? null : BigInt(p.reasoning_tokens),
@@ -655,31 +660,36 @@ export class TeamService {
         ? null
         : (members.find((m) => m.userId === opts.requestingUserId)?.role ?? null)
 
-    // Top projects. v_merged_daily only carries `project_hash` (no raw
-    // project names — rollups are post-redaction), so the dashboard
-    // displays redacted=true for the project card regardless of upload
-    // privacy level. AggregateOnly rows have NULL project_hash and are
-    // excluded; they self-deselect from project-level reporting by
-    // virtue of not sending the dimension upstream.
+    // Top projects, reported by the LITERAL project name (the "project" in
+    // what·project·who). v_merged_daily only carries `project_hash`, so this
+    // reads from usage_events to recover the raw `project` that full-mode
+    // uploads carry; redacted-mode uploads have project=NULL and fall back to
+    // the hash via COALESCE (still privacy-preserving — redacted stays
+    // redacted). AggregateOnly rows carry neither dimension and self-exclude.
+    // Bounded by the 30-day window + (team_id, project_hash) / (team_id, ts)
+    // indexes, so it stays off a full table scan.
     const projRows = await this.pool.query<{
       project_key: string
+      redacted: boolean
       cost: bigint
       event_count: bigint
     }>(
       `SELECT
-         project_hash AS project_key,
+         COALESCE(project, project_hash) AS project_key,
+         (project IS NULL) AS redacted,
          COALESCE(SUM(cost_micro_usd), 0)::bigint AS cost,
-         COALESCE(SUM(event_count), 0)::bigint AS event_count
-       FROM v_merged_daily
-       WHERE team_id = $1 AND date >= $2 AND project_hash IS NOT NULL
-       GROUP BY project_hash
+         COUNT(*)::bigint AS event_count
+       FROM usage_events
+       WHERE team_id = $1 AND timestamp >= $2
+         AND (project IS NOT NULL OR project_hash IS NOT NULL)
+       GROUP BY COALESCE(project, project_hash), (project IS NULL)
        ORDER BY cost DESC
        LIMIT 8`,
-      [teamId, sinceDate],
+      [teamId, BigInt(since)],
     )
     const topProjects: TeamProjectUsage[] = projRows.rows.map((r) => ({
       projectKey: r.project_key,
-      redacted: true,
+      redacted: r.redacted,
       costMicroUsd: r.cost.toString(),
       eventCount: Number(r.event_count),
     }))
