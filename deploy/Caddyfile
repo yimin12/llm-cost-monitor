@@ -1,0 +1,31 @@
+# TLS termination + reverse proxy for the team-sync Core Service.
+# Caddy fetches and renews a Let's Encrypt cert automatically for the domain.
+# Env vars are interpolated by Caddy at runtime (set in the root .env, passed
+# through by docker-compose.prod.yml).
+
+{
+	email {$LCM_ACME_EMAIL}
+}
+
+{$LCM_SYNC_DOMAIN} {
+	encode zstd gzip
+
+	# Proxy everything to the Node team-sync server on the internal network.
+	reverse_proxy server:4017 {
+		health_uri /healthz
+		health_interval 10s
+	}
+
+	# Minimal hardening headers (the API is JSON-only; no cookies/CORS needed
+	# because the desktop sends a Bearer token, not browser credentials).
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

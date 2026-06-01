@@ -1,0 +1,67 @@
+# Production override for a single-VPS deploy (e.g. Hetzner CX22/CX23).
+#
+# Usage (from the repo root, on the server):
+#   cp deploy/env.example .env        # then edit secrets in .env
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile server up -d
+#
+# What this overlay changes vs the dev docker-compose.yml:
+#   - Real secrets via .env (POSTGRES_PASSWORD / LCM_SERVER_DSN), not lcm_dev.
+#   - Pinned postgres image by digest (POSTGRES_IMAGE in .env).
+#   - Production auth: LCM_SERVER_AUTH=jwks + LCM_SERVER_AUDIENCE.
+#   - Adds a Caddy reverse proxy that terminates TLS (Let's Encrypt) and
+#     proxies 443 -> server:4017 over the internal compose network.
+#
+# Postgres keeps its loopback-only host publish (127.0.0.1:5433) from the base
+# file — safe on a VPS because the firewall exposes only 443 + 22. The team-sync
+# server is reachable from the internet ONLY through Caddy.
+
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:17.2-alpine}
+    environment:
+      POSTGRES_DB: llm_cost_monitor
+      POSTGRES_USER: ${POSTGRES_USER:-lcm}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+
+  server:
+    environment:
+      # Built from the same secret so the DSN and the DB password never drift.
+      LCM_SERVER_DSN: postgres://${POSTGRES_USER:-lcm}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/lcm_team_sync
+      LCM_SERVER_PORT: "4017"
+      LCM_SERVER_BIND: "0.0.0.0"
+      # Verify Google ID tokens against JWKS in production. AUDIENCE is the
+      # desktop OAuth client_id (see src/shared/oauth-config.ts).
+      LCM_SERVER_AUTH: ${LCM_SERVER_AUTH:-jwks}
+      LCM_SERVER_AUDIENCE: ${LCM_SERVER_AUDIENCE:?set LCM_SERVER_AUDIENCE in .env}
+      LCM_MAX_DEVICES_PER_USER: ${LCM_MAX_DEVICES_PER_USER:-5}
+    # The base file publishes the server on 127.0.0.1:4017 (loopback only).
+    # That stays internet-unreachable behind the firewall (only 443+22 open);
+    # Caddy reaches the server as `server:4017` over the internal network. No
+    # ports override needed — avoids the `!reset` syntax that needs Compose
+    # v2.24+. If you prefer zero host publish, run `docker compose ... up`
+    # after deleting the `ports:` block from the base server service.
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: llm-cost-monitor-caddy
+    restart: unless-stopped
+    depends_on:
+      server:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # Domain + email for automatic Let's Encrypt certs.
+      LCM_SYNC_DOMAIN: ${LCM_SYNC_DOMAIN:?set LCM_SYNC_DOMAIN in .env}
+      LCM_ACME_EMAIL: ${LCM_ACME_EMAIL:?set LCM_ACME_EMAIL in .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    security_opt:
+      - "no-new-privileges:true"
+
+volumes:
+  caddy_data:
+  caddy_config:
