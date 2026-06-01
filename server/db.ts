@@ -26,7 +26,14 @@ export function openPool(opts: PoolOpts = {}): Pool {
     opts.connectionString ??
     process.env['LCM_SERVER_DSN'] ??
     'postgres://lcm:lcm_dev@127.0.0.1:5433/lcm_team_sync'
-  return new pg.Pool({ connectionString: cs, max: opts.max ?? 5 })
+  const pool = new pg.Pool({ connectionString: cs, max: opts.max ?? 5 })
+  // Without an 'error' listener, an idle-client failure (DB restart, network
+  // blip) is re-emitted as an uncaught exception and crashes the process. The
+  // pool recovers on its own, so log and move on.
+  pool.on('error', (err: Error) => {
+    console.warn(`server pg pool: idle client error (recovering): ${err.message}`)
+  })
+  return pool
 }
 
 // Same migration loop shape as src/main/storage/migrations.ts so the

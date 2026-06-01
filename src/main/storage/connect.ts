@@ -38,6 +38,17 @@ export async function openPool(opts: ConnectOptions = {}): Promise<Pool> {
     idleTimeoutMillis: 30_000,
   })
 
+  // An idle client can drop at any time — Postgres restart, the Docker
+  // container hiccuping, a server-side idle timeout, or the laptop waking
+  // from sleep. pg re-emits that as a pool 'error' event; with no listener
+  // Node treats it as an uncaught exception and crashes the Electron main
+  // process ("Connection terminated unexpectedly"). The pool self-heals
+  // (discards the dead client, opens a fresh one on the next acquire), so we
+  // only need to swallow the event and log it.
+  pool.on('error', (err: Error) => {
+    console.warn(`pg pool: idle client error (recovering): ${err.message}`)
+  })
+
   const deadline = Date.now() + (opts.readyTimeoutMs ?? 30_000)
   let lastErr: unknown
   let delay = 200
