@@ -233,12 +233,11 @@ function teamScopedForecast(
   return { forecast, forecastByProvider: byProvider, source: 'team' }
 }
 
-export function OverviewTab({ agg, period, onPeriodChange, settings, teamOverview }: {
+export function OverviewTab({ agg, period, onPeriodChange, settings }: {
   agg: AggregateSnapshot
   period: Period
   onPeriodChange: (p: Period) => void
   settings: AppSettings | null
-  teamOverview: TeamOverview | null
 }): JSX.Element {
   const range = agg[PERIOD_RANGE[period]]
 
