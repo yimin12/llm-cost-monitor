@@ -132,7 +132,15 @@ async function handle(
         return
       }
       const token = await deps.auth.accessTokenForSync().catch(() => null)
-      const overview = await fetchTeamOverview({ baseUrl, teamId: cfg.teamId, accessToken: token })
+      const rawWindow = url.searchParams.get('window')
+      const parsedWindow = rawWindow !== null ? Number(rawWindow) : NaN
+      const windowMs = Number.isFinite(parsedWindow) && parsedWindow > 0 ? parsedWindow : undefined
+      const overview = await fetchTeamOverview({
+        baseUrl,
+        teamId: cfg.teamId,
+        accessToken: token,
+        ...(windowMs !== undefined ? { windowMs } : {}),
+      })
       sendJson(res, 200, overview)
       return
     }

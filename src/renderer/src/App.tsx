@@ -61,7 +61,7 @@ declare global {
       onAlertsUpdated: (cb: () => void) => () => void
       syncStatus: () => Promise<SyncStatus | null>
       syncDrain: () => Promise<SyncStatus | null>
-      syncTeamOverview: () => Promise<TeamOverview | null>
+      syncTeamOverview: (windowMs?: number) => Promise<TeamOverview | null>
       onSyncStatusChanged: (cb: (s: SyncStatus | null) => void) => () => void
       teamAddMember: (body: {
         userId: string
@@ -182,10 +182,6 @@ export function App(): JSX.Element {
   const [storage, setStorage] = useState<StorageInfo | null>(null)
   const [providers, setProviders] = useState<ProviderListEntry[]>([])
   const [settings, setSettings] = useState<AppSettings | null>(null)
-  // teamOverview drives the Overview tab's month-end forecast when team
-  // sync is on — projects from the user's account-wide MTD instead of
-  // just this Mac's. null when sync is off or the team server is unreachable.
-  const [teamOverview, setTeamOverview] = useState<TeamOverview | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [activeTab, setActiveTab] = useState<TabId>(loadInitialTab)
   const [period, setPeriod] = useState<Period>(loadInitialPeriod)
@@ -211,22 +207,6 @@ export function App(): JSX.Element {
     setAgg(a)
     setStorage(s)
     setProviders(ps)
-    // teamOverview is fetched separately on a parallel track so a
-    // sync-server outage doesn't block the rest of the reload. Read the
-    // *current* setting at fetch time — `settings` may not be hydrated on
-    // the first reload tick.
-    void (async () => {
-      const cur = await window.api.settings()
-      if (cur.teamSync.enabled) {
-        try {
-          setTeamOverview(await window.api.syncTeamOverview())
-        } catch {
-          setTeamOverview(null)
-        }
-      } else {
-        setTeamOverview(null)
-      }
-    })()
   }, [])
 
   // Debounced reload — coalesce bursts of usage:updated events from
@@ -390,7 +370,7 @@ export function App(): JSX.Element {
       <main className="tab-pane">
         {mountedTabs.has('overview') && (
           <div hidden={activeTab !== 'overview'}>
-            <OverviewTab agg={agg} period={period} onPeriodChange={setPeriod} settings={settings} teamOverview={teamOverview} />
+            <OverviewTab agg={agg} period={period} onPeriodChange={setPeriod} settings={settings} />
           </div>
         )}
         {mountedTabs.has('providers') && (

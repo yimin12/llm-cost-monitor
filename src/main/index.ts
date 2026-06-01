@@ -316,10 +316,15 @@ void app.whenReady().then(async () => {
     auth,
     alerts: alertRepo,
     syncQueue,
-    fetchTeamOverview: async (teamId, token) => {
+    fetchTeamOverview: async (teamId, token, windowMs) => {
       const baseUrl = settings.effectiveSyncUrl()
       if (baseUrl === null) return null
-      return fetchTeamOverview({ baseUrl, teamId, accessToken: token })
+      return fetchTeamOverview({
+        baseUrl,
+        teamId,
+        accessToken: token,
+        ...(windowMs !== undefined ? { windowMs } : {}),
+      })
     },
     teamAddMember: async (teamId, token, body) => {
       const baseUrl = settings.effectiveSyncUrl()

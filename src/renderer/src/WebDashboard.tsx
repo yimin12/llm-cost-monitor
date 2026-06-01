@@ -112,18 +112,9 @@ export function WebDashboard(): JSX.Element {
     setSettings(st)
     setAlertSummary(summary)
     setOpenAlerts(open)
-    // Team sync overview is best-effort: fetch if configured, swallow
-    // errors, leave the section hidden when null. Don't block the rest
-    // of the dashboard on a slow/unreachable team backend.
-    if (st.teamSync.enabled && st.teamSync.teamId !== null) {
-      try {
-        setTeamOverview(await window.api.syncTeamOverview())
-      } catch {
-        setTeamOverview(null)
-      }
-    } else {
-      setTeamOverview(null)
-    }
+    // teamOverview fetched by its own period-aware effect below — keeps
+    // the per-period ?window=<ms> override flowing without baking the
+    // period dependency into this generic reload.
   }, [])
 
   const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -134,6 +125,42 @@ export function WebDashboard(): JSX.Element {
       void reload()
     }, 250)
   }, [reload])
+
+  // Fetch (and re-poll every 5 min) the team-overview keyed to the
+  // currently-selected period, so the Account row matches the local
+  // row above. Re-fires on period change so switching today → 1y
+  // re-asks the server for the right window. Hidden when sync is off.
+  useEffect(() => {
+    if (settings?.teamSync.enabled !== true || settings.teamSync.teamId === null) {
+      setTeamOverview(null)
+      return
+    }
+    // "today" anchors to UTC midnight (matching agg.today semantics) so
+    // the Account cost tile doesn't inflate with yesterday-evening
+    // calls; other periods are rolling-N-days.
+    const periodWindowMs = period === 'today'
+      ? (() => {
+          const d = new Date()
+          const midnightUtc = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
+          return Math.max(1, Date.now() - midnightUtc)
+        })()
+      : PERIOD_DAYS[period] * 24 * 60 * 60_000
+    let cancelled = false
+    const tick = async (): Promise<void> => {
+      try {
+        const ov = await window.api.syncTeamOverview(periodWindowMs)
+        if (!cancelled) setTeamOverview(ov)
+      } catch {
+        /* leave stale value on transient failure */
+      }
+    }
+    void tick()
+    const id = window.setInterval(() => void tick(), 5 * 60_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [settings?.teamSync.enabled, settings?.teamSync.teamId, period])
 
   useEffect(() => {
     void window.api.pricingInfo().then(setPricing)
@@ -351,6 +378,53 @@ export function WebDashboard(): JSX.Element {
           </article>
         </section>
 
+        {/* Account total — sums every device the signed-in user has
+            registered on this team. Polls team-overview every 5 min via
+            the effect above so a second machine (e.g. mac + mbp on the
+            same account) shows up here without manual refresh. Window
+            is the server's 30d default; the per-machine KPIs above
+            follow the user's selected period. */}
+        {(() => {
+          const myUserId = settings?.teamSync.userId ?? null
+          if (teamOverview === null || myUserId === null) return null
+          const me = teamOverview.members.find((m) => m.userId === myUserId)
+          if (me === undefined) return null
+          const myNodes = teamOverview.nodes.filter((n) => n.userId === myUserId)
+          const activeWindowMs = Date.now() - 24 * 3600 * 1000
+          const myActiveCount = myNodes.filter(
+            (n) => n.lastSeenAt !== null && n.lastSeenAt >= activeWindowMs,
+          ).length
+          const acctUsd = Number(me.costMicroUsd) / 1_000_000
+          return (
+            <section
+              className="web-kpi-row web-kpi-row-triple"
+              aria-label={`Account total across ${myNodes.length} device${myNodes.length === 1 ? '' : 's'}`}
+            >
+              <article className="web-kpi">
+                <span className="web-kpi-label">Account cost</span>
+                <span className="web-kpi-value">
+                  {acctUsd >= 100 ? `$${acctUsd.toFixed(1)}` : `$${acctUsd.toFixed(2)}`}
+                </span>
+                <span className="web-kpi-sub">{PERIOD_LABEL[period]} total</span>
+              </article>
+              <article className="web-kpi">
+                <span className="web-kpi-label">Account tokens</span>
+                <span className="web-kpi-value secondary">
+                  {formatTokens(me.inputTokens + me.outputTokens)}
+                </span>
+                <span className="web-kpi-sub">{PERIOD_LABEL[period]} in + out</span>
+              </article>
+              <article className="web-kpi">
+                <span className="web-kpi-label">Active now</span>
+                <span className="web-kpi-value secondary">
+                  {myActiveCount}/{myNodes.length}
+                </span>
+                <span className="web-kpi-sub">24h window</span>
+              </article>
+            </section>
+          )
+        })()}
+
         {/* Daily spend trend. Provider share donut + Top providers/
             models/projects tables + Recent sessions used to live here;
             all of that duplicated tray-panel content, so it's been
@@ -476,7 +550,7 @@ export function WebDashboard(): JSX.Element {
           </article>
 
           {/* Yield Score (cost per commit) — same component the tray uses. */}
-          <YieldScoreCard settings={settings} />
+          <YieldScoreCard settings={settings} outerPeriod={period} />
         </section>
 
         {/* Three-column data row: providers / models / projects. */}
@@ -489,7 +563,10 @@ export function WebDashboard(): JSX.Element {
               </div>
             </header>
             <ul className="web-table">
-              {providerRows.map((p) => {
+              {/* Overview is a glance surface — cap the long tail at the
+                  top 3 each so the page stays scannable. Full ranked
+                  lists live on the Providers / Sessions tabs. */}
+              {providerRows.slice(0, 3).map((p) => {
                 const pct = (Number(p.costMicroUsd) / providerTotal) * 100
                 const color = providerColor(p.provider)
                 return (
@@ -514,7 +591,7 @@ export function WebDashboard(): JSX.Element {
               </div>
             </header>
             <ul className="web-table">
-              {agg.topModelsToday.map((m) => {
+              {agg.topModelsToday.slice(0, 3).map((m) => {
                 const pct = (Number(m.costMicroUsd) / modelTotal) * 100
                 const color = providerColor(m.provider)
                 return (
@@ -539,7 +616,7 @@ export function WebDashboard(): JSX.Element {
               </div>
             </header>
             <ul className="web-table">
-              {agg.topProjectsToday.map((p) => {
+              {agg.topProjectsToday.slice(0, 3).map((p) => {
                 const pct = (Number(p.costMicroUsd) / projectTotal) * 100
                 const label = p.project === '(none)' ? 'no project' : p.project
                 return (
@@ -738,7 +815,9 @@ export function WebDashboard(): JSX.Element {
                   <p className="web-empty">no project activity</p>
                 ) : (
                   <ul className="web-team-rows">
-                    {teamOverview.topProjects.map((p) => (
+                    {/* Glance surface — cap each breakdown to top 3; full ranked
+                        lists live behind the audit drilldown (TODO: link). */}
+                    {teamOverview.topProjects.slice(0, 3).map((p) => (
                       <li key={p.projectKey}>
                         <span
                           className="web-team-label"
@@ -761,7 +840,7 @@ export function WebDashboard(): JSX.Element {
               <div className="web-team-block">
                 <h3>By provider · model</h3>
                 <ul className="web-team-rows">
-                  {teamOverview.byProvider.map((p) => (
+                  {teamOverview.byProvider.slice(0, 3).map((p) => (
                     <li key={`${p.provider}|${p.model}`}>
                       <span
                         className="web-team-chip"
@@ -785,7 +864,7 @@ export function WebDashboard(): JSX.Element {
               <div className="web-team-block">
                 <h3>Active nodes</h3>
                 <ul className="web-team-rows">
-                  {teamOverview.nodes.map((n) => (
+                  {teamOverview.nodes.slice(0, 3).map((n) => (
                     <li key={n.nodeId}>
                       <span className="web-team-label" title={n.nodeId}>
                         {n.displayName ?? `${n.nodeId.slice(0, 8)}…`}

@@ -222,6 +222,11 @@ html.web #root {
   grid-template-columns: 1.4fr 1fr 1fr 1fr;
   gap: 16px;
 }
+/* Three-tile variant for the account-aggregated row (cost + tokens +
+   active devices). Each tile spans evenly — no hero stretch. */
+.web-kpi-row-triple {
+  grid-template-columns: 1fr 1fr 1fr;
+}
 .web-kpi {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
   border: 1px solid rgba(255, 255, 255, 0.08);
