@@ -525,7 +525,15 @@ export class TeamService {
   // and supported by usage_events_team_ts_idx.
   async getOverview(
     teamId: string,
-    opts: { requestingUserId?: string; windowMs?: number } = {},
+    opts: {
+      requestingUserId?: string
+      windowMs?: number
+      // Client's local midnight in millis. When provided, replaces the
+      // server's UTC-midnight boundary for "today" — a US user past their
+      // local midnight then sees `todayCostMicroUsd` reset alongside
+      // their local KPI tile instead of trailing it by several hours.
+      todayStartMs?: number
+    } = {},
   ): Promise<TeamOverview> {
     const windowMs = opts.windowMs ?? 30 * 24 * 3600_000
     const now = Date.now()
@@ -536,12 +544,17 @@ export class TeamService {
     // by a few hours of partial-day data on the trailing edge.
     const sinceDate = new Date(since).toISOString().slice(0, 10)
 
-    // Today window starts at the most recent UTC midnight. Cheap lower
-    // bound for the KPI 'cost today' card — pulse-style dashboard wants
-    // it without an extra round-trip.
-    const todayStart = new Date(now)
-    todayStart.setUTCHours(0, 0, 0, 0)
-    const todaySince = todayStart.getTime()
+    // Today window — defaults to UTC midnight, overridden by the caller's
+    // local midnight when supplied. Clamped to a sane recent range so a
+    // bogus client clock can't read events from years ago.
+    const utcMidnight = new Date(now)
+    utcMidnight.setUTCHours(0, 0, 0, 0)
+    const utcMidnightMs = utcMidnight.getTime()
+    const todaySince =
+      opts.todayStartMs !== undefined &&
+      Math.abs(opts.todayStartMs - utcMidnightMs) <= 24 * 3600_000
+        ? opts.todayStartMs
+        : utcMidnightMs
 
     // Members + their event totals + role/status. Joined against the
     // merged rollup so 30-day SUMs are over (users × nodes × models)
@@ -682,6 +695,51 @@ export class TeamService {
       [teamId, BigInt(todaySince)],
     )
 
+    // Per-user month-to-date — from the 1st of the current calendar month
+    // (UTC) to now, scoped to the requesting user across all their synced
+    // nodes. Drives the Overview tab's month-end forecast when team sync
+    // is on so the projection sees account-wide spend instead of just one
+    // Mac. Uses v_merged_daily so it stays off raw events for the (potentially
+    // 31-day-wide) window. Only computed when the caller has a userId —
+    // otherwise the field stays null and the renderer falls back to local.
+    const monthStartDate = new Date(now)
+    monthStartDate.setUTCDate(1)
+    monthStartDate.setUTCHours(0, 0, 0, 0)
+    const monthSinceDate = monthStartDate.toISOString().slice(0, 10)
+    let currentUserMonthCostMicroUsd: string | null = null
+    let currentUserMonthByProvider: TeamProviderUsage[] = []
+    if (opts.requestingUserId !== undefined && opts.requestingUserId.length > 0) {
+      const monthTotalRow = await this.pool.query<{ cost: bigint }>(
+        `SELECT COALESCE(SUM(cost_micro_usd), 0)::bigint AS cost
+         FROM v_merged_daily
+         WHERE team_id = $1 AND user_id = $2 AND date >= $3`,
+        [teamId, opts.requestingUserId, monthSinceDate],
+      )
+      currentUserMonthCostMicroUsd = (monthTotalRow.rows[0]?.cost ?? 0n).toString()
+
+      const monthProvRows = await this.pool.query<{
+        provider: string
+        model: string
+        cost: bigint
+        event_count: bigint
+      }>(
+        `SELECT provider, model,
+                COALESCE(SUM(cost_micro_usd), 0)::bigint AS cost,
+                COALESCE(SUM(event_count), 0)::bigint AS event_count
+         FROM v_merged_daily
+         WHERE team_id = $1 AND user_id = $2 AND date >= $3
+         GROUP BY provider, model
+         ORDER BY cost DESC`,
+        [teamId, opts.requestingUserId, monthSinceDate],
+      )
+      currentUserMonthByProvider = monthProvRows.rows.map((r) => ({
+        provider: r.provider,
+        model: r.model,
+        costMicroUsd: r.cost.toString(),
+        eventCount: Number(r.event_count),
+      }))
+    }
+
     const teamMeta = await this.getTeamMeta(teamId)
 
     // Active node = seen in the last 24h. Cheap, deterministic, and
@@ -705,6 +763,8 @@ export class TeamService {
       totalEventCount: Number(totalRow.rows[0]?.event_count ?? 0n),
       activeMembers,
       activeNodes,
+      currentUserMonthCostMicroUsd,
+      currentUserMonthByProvider,
       members,
       topProjects,
       byProvider,

@@ -168,6 +168,12 @@ export interface TeamOverview {
   totalEventCount: number
   activeMembers: number
   activeNodes: number
+  // Month-to-date spend scoped to the *requesting user* across all their
+  // synced nodes. Used by the renderer's month-end forecast card to
+  // project account-wide spend instead of just the local machine's.
+  // null when the requester isn't a member yet (no events to sum).
+  currentUserMonthCostMicroUsd: string | null
+  currentUserMonthByProvider: TeamProviderUsage[]
   members: TeamMemberUsage[]
   topProjects: TeamProjectUsage[]
   byProvider: TeamProviderUsage[]

@@ -8,15 +8,29 @@ export interface FetchTeamOverviewOpts {
   timeoutMs?: number
 }
 
+function startOfLocalDayMs(now: Date = new Date()): number {
+  const d = new Date(now)
+  d.setHours(0, 0, 0, 0)
+  return d.getTime()
+}
+
 // GET the team usage rollup. Returns null on failure — the renderer treats
 // "no team data" as an empty state, not an error, since the dashboard is
 // best-effort and shouldn't block usage of the local panel.
+//
+// We pass the client's local midnight as `todayStartMs` so the server's
+// "today" matches what the local KPI card considers today — without it,
+// the server applies UTC midnight and a US user past their local midnight
+// would see the Account-today tile lag the Today tile by several hours.
 export async function fetchTeamOverview(
   opts: FetchTeamOverviewOpts,
 ): Promise<TeamOverview | null> {
   const fetchImpl = opts.fetchImpl ?? fetch
   const base = opts.baseUrl.replace(/\/+$/, '')
-  const url = `${base}/v1/teams/${encodeURIComponent(opts.teamId)}/usage`
+  const todayStartMs = startOfLocalDayMs()
+  const url =
+    `${base}/v1/teams/${encodeURIComponent(opts.teamId)}/usage` +
+    `?todayStartMs=${todayStartMs}`
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 8_000)
   try {
