@@ -26,6 +26,7 @@ import { FileCache } from './storage/file-cache'
 import { runMigrations } from './storage/migrations'
 import { CursorRepository } from './sync/cursor-repository'
 import { NodeIdentityRepository } from './sync/node-identity'
+import { OutboxRepository } from './sync/outbox-repository'
 import { SyncQueue } from './sync/sync-queue'
 import { HttpSyncTransport } from './sync/transport'
 import {
@@ -219,8 +220,11 @@ void app.whenReady().then(async () => {
     `pricing snapshot ${pricing.snapshotVersion}, ${pricing.modelCount} models loaded`,
   )
 
-  // Postgres-in-Docker (dev) — see docs/auth-plan.md §3 + docker-compose.yml.
-  // Shipped builds will swap in a SQLite implementation in a later slice.
+  // Storage is Postgres in BOTH dev and shipped builds. The earlier
+  // README mention of a SQLite swap is no longer planned — see
+  // docs/storage-decision.md for the rationale. Shipped builds bundle
+  // an embedded Postgres (or point at a user-managed instance via
+  // DATABASE_URL); they do NOT fall back to SQLite.
   try {
     pool = await openPool({})
   } catch (err) {
@@ -282,12 +286,12 @@ void app.whenReady().then(async () => {
   })
   await nodes.ensure()
   const cursors = new CursorRepository(pool)
-  const eventsRepo = events
+  const outbox = new OutboxRepository(pool)
   const buildSyncQueue = (): SyncQueue | null => {
     const url = settings.effectiveSyncUrl()
     if (url === null) return null
     return new SyncQueue({
-      events: eventsRepo,
+      outbox,
       cursors,
       nodes,
       transport: new HttpSyncTransport({ baseUrl: url }),

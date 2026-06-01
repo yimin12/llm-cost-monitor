@@ -48,7 +48,8 @@ describe('EventRepository (Postgres)', () => {
   })
 
   beforeEach(async () => {
-    await pool.query('TRUNCATE TABLE events')
+    // CASCADE because sync_outbox has a FK on events.id (slice 6).
+    await pool.query('TRUNCATE TABLE events CASCADE')
     repo = new EventRepository(pool)
   })
 

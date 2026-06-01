@@ -14,12 +14,15 @@
 # volume `lcm_pgdata` that survives `docker compose down`; only `db:reset`
 # (or `docker volume rm lcm_pgdata`) destroys it.
 #
-# Shipped Electron builds do NOT use this — they keep SQLite. See
-# docs/auth-plan.md §2 and docs/docker-portable.md.
+# Postgres is the only event-store backend in both dev and shipped builds.
+# Rationale: docs/storage-decision.md. Docker layout: docs/docker-portable.md.
 
 services:
   postgres:
-    image: postgres:17-alpine
+    # Pin to a specific minor. Override with POSTGRES_IMAGE=postgres:17.x-alpine
+    # for upgrades. Pinning by digest is recommended in CI/prod — see
+    # docs/docker-portable.md for the workflow.
+    image: ${POSTGRES_IMAGE:-postgres:17.2-alpine}
     container_name: llm-cost-monitor-postgres
     restart: unless-stopped
     environment:
@@ -41,6 +44,13 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    security_opt:
+      - "no-new-privileges:true"
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: "1.0"
 
   # One-shot Prisma migration runner for the desktop database.
   # Run with:  docker compose run --rm migrate-desktop
@@ -121,6 +131,21 @@ services:
       timeout: 3s
       start_period: 5s
       retries: 5
+    # Hardening: read-only rootfs (the server writes nothing to disk; it
+    # logs to stdout and connects to Postgres over TCP). /tmp is a tmpfs
+    # so any transient file work the Node runtime needs still succeeds.
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "0.5"
 
 volumes:
   lcm_pgdata:

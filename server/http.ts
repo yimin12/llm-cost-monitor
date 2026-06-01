@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 
 import type { SyncPayload } from '../src/shared/sync'
 
+import type { Authorizer } from './auth'
 import { TeamService, TeamServiceError } from './team-service'
 
 // Minimal HTTP layer using Node's built-in `http`. Two routes:
@@ -13,16 +14,14 @@ import { TeamService, TeamServiceError } from './team-service'
 // the server is small enough that a 60-line router keeps deps shallow
 // and keeps `npm install` fast.
 //
-// AUTH (v1): the desktop sends `Authorization: Bearer <google-id-token>`.
-// In production the server would verify the JWT signature; for the v1
-// scaffold we trust the client and use the token's `sub` claim as the
-// requesting user identity. A second commit will tighten this with
-// `verifyGoogleIdToken` from src/main/auth.
+// Auth: the `authorize` callback is async because production mode runs
+// JWKS-backed `jwtVerify` (see `./auth`). Tests inject a synchronous
+// stub; `await` on a non-Promise resolves immediately.
 
 interface RouteCtx {
   service: TeamService
   // Override for tests so we don't need a real server bound to a port.
-  authorize: (req: IncomingMessage) => { userId: string | null }
+  authorize: Authorizer | ((req: IncomingMessage) => { userId: string | null })
   log: (line: string) => void
 }
 
@@ -68,7 +67,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: RouteCtx):
   const upsertMatch = url.match(/^\/v1\/teams\/([^/]+)\/events:batchUpsert(\?.*)?$/)
   if (method === 'POST' && upsertMatch !== null) {
     const teamId = decodeURIComponent(upsertMatch[1]!)
-    const auth = ctx.authorize(req)
+    const auth = await ctx.authorize(req)
     if (auth.userId === null) {
       sendJson(res, 401, { error: 'unauthenticated' })
       return
@@ -99,7 +98,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: RouteCtx):
   const usageMatch = url.match(/^\/v1\/teams\/([^/]+)\/usage(\?.*)?$/)
   if (method === 'GET' && usageMatch !== null) {
     const teamId = decodeURIComponent(usageMatch[1]!)
-    const auth = ctx.authorize(req)
+    const auth = await ctx.authorize(req)
     if (auth.userId === null) {
       sendJson(res, 401, { error: 'unauthenticated' })
       return
@@ -126,7 +125,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: RouteCtx):
   const requireAdmin = async (
     teamId: string,
   ): Promise<{ ok: true; userId: string } | { ok: false }> => {
-    const auth = ctx.authorize(req)
+    const auth = await ctx.authorize(req)
     if (auth.userId === null) {
       sendJson(res, 401, { error: 'unauthenticated' })
       return { ok: false }
@@ -260,28 +259,3 @@ export function createApp(ctx: RouteCtx): Server {
   })
 }
 
-// Trivial bearer-token authorizer. Production would replace this with a
-// JWT verifier. For now we accept any token, decode the JWT payload
-// without verification, and use its `sub` claim if present, otherwise
-// the literal token string. Disabled-by-default in local dev when
-// LCM_SERVER_AUTH=insecure-noverify (the default).
-export function defaultAuthorize(req: IncomingMessage): { userId: string | null } {
-  const header = req.headers['authorization']
-  if (typeof header !== 'string' || !header.startsWith('Bearer ')) return { userId: null }
-  const token = header.slice('Bearer '.length).trim()
-  if (token.length === 0) return { userId: null }
-  // Try to decode JWT payload (middle segment, base64url JSON). On parse
-  // failure we still allow the raw token through as the userId.
-  const parts = token.split('.')
-  if (parts.length === 3) {
-    try {
-      const json = Buffer.from(parts[1]!, 'base64url').toString('utf8')
-      const claims = JSON.parse(json) as { sub?: string; email?: string }
-      const sub = claims.sub ?? claims.email ?? null
-      if (sub !== null) return { userId: sub }
-    } catch {
-      // fall through
-    }
-  }
-  return { userId: token }
-}
