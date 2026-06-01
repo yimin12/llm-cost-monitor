@@ -248,7 +248,12 @@ void app.whenReady().then(async () => {
 
   aggregator = new Aggregator(pool)
   const fileCache = new FileCache(pool)
-  providers = new ProviderRegistry({ pricing, events, fileCache })
+  providers = new ProviderRegistry({
+    pricing,
+    events,
+    fileCache,
+    googlePlanCachePath: path.join(app.getPath('userData'), 'google-plan-cache.json'),
+  })
   const settings = new SettingsStore(path.join(app.getPath('userData'), 'settings.json'))
 
   // Exports today's spend to a JSON file the Claude Code statusline

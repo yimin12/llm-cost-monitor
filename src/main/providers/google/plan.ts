@@ -6,6 +6,12 @@ import { decodeJwt } from 'jose'
 import { unknownPlan, type PlanInfo } from '@shared/plan-info'
 
 import { resolveGeminiHome } from '../../parsers/gemini'
+import {
+  formatCacheAge,
+  loadCachedPlan,
+  saveCachedPlan,
+  type CachedPlan,
+} from './plan-cache'
 
 interface GeminiOAuthCreds {
   access_token?: string
@@ -139,6 +145,13 @@ export interface GooglePlanDeps {
   // an implementation that returns 404 so the Code Assist call never
   // actually hits the network.
   fetchImpl?: typeof fetch
+  // Where to read/write the last-known-good plan cache (see plan-cache.ts).
+  // null disables caching entirely — used in tests that want a pure
+  // detector with no disk side effects. Production callers (the Electron
+  // main process) wire this to `<userData>/google-plan-cache.json`.
+  cachePath?: string | null
+  // Test seam.
+  now?: () => number
 }
 
 async function readJsonFile<T>(path: string): Promise<T | null> {
@@ -190,6 +203,19 @@ export async function detectGooglePlan(deps: GooglePlanDeps = {}): Promise<PlanI
       if (tier !== null) codeAssistResult = planNameFromCodeAssist(tier)
     }
     if (codeAssistResult !== null) {
+      // Persist for the next Code Assist outage (token expiry, network
+      // hiccup, …). Best-effort — saveCachedPlan never throws.
+      if (deps.cachePath !== null && deps.cachePath !== undefined) {
+        await saveCachedPlan(
+          deps.cachePath,
+          {
+            tier: codeAssistResult.name,
+            isPaid: codeAssistResult.isPaid,
+            email,
+          },
+          deps.now,
+        )
+      }
       return {
         // Reserve `subscription` for paid tiers (Pro / Ultra / Standard /
         // Enterprise). Free / Legacy stay in OAuth-mode so the chip
@@ -200,8 +226,22 @@ export async function detectGooglePlan(deps: GooglePlanDeps = {}): Promise<PlanI
         detail: email,
       }
     }
-    // Fallback when the Code Assist endpoint is unreachable (offline /
-    // 5xx / refresh failed / response shape unfamiliar).
+    // Code Assist unreachable. Before flipping to "Google Account", try
+    // the last-known-good cache — the chip stays stable instead of
+    // visibly flipping every ~hour as the CLI token expires.
+    let cached: CachedPlan | null = null
+    if (deps.cachePath !== null && deps.cachePath !== undefined) {
+      cached = await loadCachedPlan(deps.cachePath, deps.now)
+    }
+    if (cached !== null) {
+      return {
+        authMode: cached.isPaid ? 'subscription' : 'oauth',
+        planName: cached.tier,
+        source: `${credsPath} (${formatCacheAge(cached.detectedAt, (deps.now ?? Date.now)())})`,
+        detail: cached.email ?? email,
+      }
+    }
+    // No cache either — fall back to the OIDC-only display.
     return {
       authMode: 'oauth',
       planName: hostedDomain !== null ? 'Workspace Account' : 'Google Account',
