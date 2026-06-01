@@ -46,9 +46,13 @@ RUN apk add --no-cache tini wget ca-certificates
 
 # Install only the runtime deps the server actually imports. Versions
 # track package.json so prod and dev stay in sync.
+# jose pinned to v5 (CommonJS-compatible). v6 is ESM-only, and the server
+# compiles to CommonJS (tsconfig.server.json), so `require("jose")` from v6
+# throws ERR_REQUIRE_ESM and crash-loops the container. v5 is API-compatible
+# for createRemoteJWKSet / jwtVerify / decodeJwt — the only jose APIs used.
 RUN echo '{"name":"lcm-server-runtime","private":true}' > package.json && \
     npm install --omit=optional --omit=dev --no-audit --no-fund --no-package-lock \
-      pg@8.20.0 jose@6.2.3 && \
+      pg@8.20.0 jose@5.9.6 && \
     npm cache clean --force
 
 # Compiled JS preserves the source layout (out-server/server/*.js,
