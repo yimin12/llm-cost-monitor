@@ -1,7 +1,8 @@
+import type { webcrypto } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 
-import { exportJWK, generateKeyPair, SignJWT, type KeyLike } from 'jose'
+import { exportJWK, generateKeyPair, SignJWT } from 'jose'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { configFromEnv, createAuthorizer } from '../auth'
@@ -36,7 +37,7 @@ describe('configFromEnv', () => {
 
 describe('createAuthorizer (jwks mode)', () => {
   let kid: string
-  let privateKey: KeyLike
+  let privateKey: webcrypto.CryptoKey
   let jwksServer: Server
   let jwksUrl: string
 
