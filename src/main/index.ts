@@ -199,7 +199,7 @@ async function updateTrayPresentation(): Promise<void> {
   // any extra label would be redundant. When all clear, the cost takes
   // the slot. Linux still spells it out in the tooltip since it has no
   // icon-swap visual signal to lean on.
-  const title = hasAlerts ? String(openCount) : cost
+  const title = hasAlerts ? `⚠ ${openCount}` : `💰 ${cost}`
   if (process.platform === 'darwin') {
     tray.setTitle(title)
   } else {
@@ -380,10 +380,7 @@ void app.whenReady().then(async () => {
     `tray registered (icon empty=${baseTrayIcon.isEmpty()}, size=${JSON.stringify(baseTrayIcon.getSize())})`,
   )
   if (process.platform === 'darwin') {
-    tray.setTitle('$0.00')
-    // Setting activation policy *after* Tray creation. Calling dock.hide()
-    // (or transitioning to accessory) before the Tray exists can suppress
-    // the menubar icon on macOS.
+    tray.setTitle('💰 LCM $0.00')
     app.setActivationPolicy('accessory')
   } else {
     tray.setToolTip('devbar')
