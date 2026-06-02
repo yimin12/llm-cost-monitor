@@ -418,6 +418,33 @@ describe('TeamService.getOverview', () => {
     expect(ov.topProjects[0]!.projectKey).toBe('h-1')
   })
 
+  it('reports the LITERAL project name (full mode) with redacted=false', async () => {
+    await svc.batchUpsert('team-A', [
+      evt({ local_event_id: 'a', project: 'billing-api', project_hash: null }),
+      evt({ local_event_id: 'b', project: 'billing-api', project_hash: null }),
+      evt({ local_event_id: 'c', project: null, project_hash: 'h-redacted' }),
+    ])
+    const ov = await svc.getOverview('team-A')
+    const literal = ov.topProjects.find((p) => p.projectKey === 'billing-api')
+    expect(literal).toBeDefined()
+    expect(literal!.redacted).toBe(false)
+    expect(literal!.eventCount).toBe(2)
+    // Redacted-mode uploads still fall back to the hash, never leaking a name.
+    const redacted = ov.topProjects.find((p) => p.projectKey === 'h-redacted')
+    expect(redacted!.redacted).toBe(true)
+  })
+
+  it('never persists session_id / message_id, even from full-mode uploads', async () => {
+    await svc.batchUpsert('team-A', [
+      evt({ project: 'billing-api', session_id: 'sensitive-session', message_id: 'sensitive-msg' }),
+    ])
+    const rows = await pool.query<{ session_id: string | null; message_id: string | null }>(
+      `SELECT session_id, message_id FROM usage_events`,
+    )
+    expect(rows.rows[0]!.session_id).toBeNull()
+    expect(rows.rows[0]!.message_id).toBeNull()
+  })
+
   it('reports nodes registered through batchUpsert', async () => {
     await svc.batchUpsert('team-A', [evt({ node_id: 'n-1' })])
     const ov = await svc.getOverview('team-A')
