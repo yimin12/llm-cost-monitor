@@ -15,6 +15,9 @@ Open-source **macOS + Linux** tray app that tracks LLM token usage and cost acro
   server in `server/` collects redacted projections of usage events
   for cross-node and team rollups. See [`docs/team-sync.md`](./docs/team-sync.md).
   Strictly off by default; existing installs see no behavior change.
+  A live instance is running — to point a node at it, see
+  **[Connect to the running instance](./deploy/README.md#connect-to-the-running-instance-live)**
+  (`https://157-151-229-109.sslip.io`, Google-token auth).
 - **Portable backend (`docker compose --profile server up`)**: the
   team-sync server ships as `Dockerfile.server` so private deployments
   drop in with one command. See
