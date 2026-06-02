@@ -11,6 +11,66 @@ existing Docker stack (`docker-compose.yml`) plus the production overlay
 > Free serverless tiers (Neon/Supabase) are $0 but cap storage and cold-start /
 > pause — not chosen for a real team needing uptime.
 
+## Connect to the running instance (live)
+
+A live instance is already running on an Oracle Cloud Always-Free VM. Other
+nodes connect to it over HTTPS:
+
+| | |
+|---|---|
+| **Base URL** | `https://157-151-229-109.sslip.io` |
+| **TLS** | Let's Encrypt (auto-renewed by Caddy); HTTP→HTTPS auto-redirect |
+| **Auth** | `Authorization: Bearer <Google ID token>` — verified against Google's JWKS (`LCM_SERVER_AUTH=jwks`), audience = the desktop OAuth client_id in `src/shared/oauth-config.ts` |
+| **Access rule** | a token only sees a team it is an **active member** of; writes additionally require the `sync_event_id` forgery guard (`sha256(team\|user\|node\|local)`) |
+
+The raw server port (`4017`) is **not** internet-exposed — only Caddy on 443 is.
+
+### From the desktop app (the normal path)
+1. Open team-sync settings and set the server URL to
+   **`https://157-151-229-109.sslip.io`** (persisted as `teamSync.serverUrl`,
+   `src/shared/sync.ts`).
+2. Sign in with Google. The app attaches your Google ID token on every request;
+   the server maps the token's `sub` to your user and merges this node's token +
+   cost data into your team totals.
+3. An admin must have added your user to the team first (see *Managing members*
+   below). Trigger a sync — the dashboard then shows usage summed across nodes.
+
+### Health check (no auth)
+```sh
+curl https://157-151-229-109.sslip.io/healthz        # -> {"ok":true}
+```
+
+### Calling the API directly (scripts / other clients)
+You need a valid Google ID token for the desktop client_id (the desktop app
+obtains one via OAuth; there is no API key). Then:
+```sh
+TOKEN=<google_id_token>
+# Read a team's rollup (cost + tokens summed across all nodes).
+# Default window is 30 days; widen with ?window=<ms>.
+curl "https://157-151-229-109.sslip.io/v1/teams/<teamId>/usage?window=$((90*24*3600*1000))" \
+  -H "Authorization: Bearer $TOKEN"
+
+# Upload this node's events (idempotent batch upsert).
+curl -X POST "https://157-151-229-109.sslip.io/v1/teams/<teamId>/events:batchUpsert" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"events":[ /* SyncedEventV1[] — shape in src/shared/sync.ts */ ]}'
+```
+Requests with a missing/invalid token get **401**. The team view reports usage
+by **what** (provider/model), **project** (literal name), and **who** (user);
+session/message ids are never stored or returned.
+
+### Managing members (admin)
+A team admin adds a teammate so their token can sync:
+```sh
+curl -X POST "https://157-151-229-109.sslip.io/v1/teams/<teamId>/members" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"userId":"<google_sub>","role":"member","displayName":"Teammate"}'
+```
+
+> The rest of this document is the from-scratch deployment runbook (provision a
+> box, bring the stack up, backups). To merely *connect* to the instance above,
+> you only need the steps in this section.
+
 ## What the DB records
 Per-node token counts (input/output/cache/reasoning) and per-event & per-day
 **cost in micro-USD (BIGINT)**, summed across nodes per user and per team

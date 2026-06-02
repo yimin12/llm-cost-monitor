@@ -1,0 +1,39 @@
+# Production overlay for the box stack (docker-compose.box.yml).
+# Adds Caddy (TLS termination via Let's Encrypt) in front of the team-sync
+# server and switches the server to real jwks auth. Reuses the existing
+# lcm-server:fixed image and the lcm_pgdata volume — no rebuild, no data move.
+#
+#   docker compose -f docker-compose.box.yml -f docker-compose.box.prod.yml --env-file .env up -d
+#
+# Server stays published on 127.0.0.1:4017 (loopback); the only internet-
+# reachable surface is Caddy on 443 (+80 for ACME). Caddy proxies to the
+# server over the compose network as `server:4017`.
+services:
+  server:
+    environment:
+      LCM_SERVER_AUTH: jwks
+      LCM_SERVER_AUDIENCE: ${LCM_SERVER_AUDIENCE:?set LCM_SERVER_AUDIENCE in .env}
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: lcm-caddy
+    restart: unless-stopped
+    depends_on:
+      server:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      LCM_SYNC_DOMAIN: ${LCM_SYNC_DOMAIN:?set LCM_SYNC_DOMAIN in .env}
+      LCM_ACME_EMAIL: ${LCM_ACME_EMAIL:?set LCM_ACME_EMAIL in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    security_opt:
+      - "no-new-privileges:true"
+
+volumes:
+  caddy_data:
+  caddy_config:
